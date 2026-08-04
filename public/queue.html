@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>零区冲突 · 排队中</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    background: #05070d;
+    color: #e8f4ff;
+    font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+  }
+  body {
+    background:
+      radial-gradient(ellipse at 50% 20%, rgba(20, 40, 70, .55), transparent 55%),
+      #05070d;
+  }
+  .card {
+    width: min(92vw, 360px);
+    padding: 28px 24px 22px;
+    text-align: center;
+    background: rgba(10, 14, 24, .88);
+    border: 1px solid rgba(53, 224, 255, .35);
+    border-radius: 14px;
+    box-shadow: 0 0 48px rgba(53, 224, 255, .1);
+    position: relative;
+  }
+  .brand {
+    font-size: 22px; font-weight: 800; letter-spacing: 4px;
+    background: linear-gradient(90deg, #35e0ff, #7db4ff 55%, #ff4d9d);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    cursor: default;
+  }
+  .sub { margin-top: 6px; font-size: 11px; letter-spacing: 2px; color: #7fa8c9; }
+  .why {
+    margin-top: 14px; padding: 10px 12px;
+    font-size: 12px; line-height: 1.55; color: #8fa8bd; text-align: left;
+    background: rgba(255,255,255,.03); border-radius: 8px;
+    border: 1px solid rgba(255,255,255,.06);
+  }
+  .pos {
+    margin: 18px 0 8px;
+    font-size: 48px; font-weight: 800; line-height: 1;
+    color: #35e0ff;
+    text-shadow: 0 0 20px rgba(53, 224, 255, .35);
+  }
+  .pos small { display: block; margin-top: 8px; font-size: 13px; font-weight: 600; color: #9fd8ef; letter-spacing: 1px; }
+  .meta { margin-top: 14px; font-size: 13px; color: #8fa8bd; line-height: 1.6; }
+  .meta b { color: #ffd23c; font-weight: 700; }
+  .bar {
+    margin: 18px auto 0; width: 100%; height: 4px; border-radius: 999px;
+    background: rgba(255, 255, 255, .06); overflow: hidden;
+  }
+  .bar > i {
+    display: block; height: 100%; width: 35%;
+    background: linear-gradient(90deg, #35e0ff, #ff4d9d);
+    border-radius: 999px;
+    animation: slide 1.4s ease-in-out infinite;
+  }
+  @keyframes slide {
+    0% { transform: translateX(-120%); }
+    100% { transform: translateX(320%); }
+  }
+  .hint { margin-top: 14px; font-size: 11px; color: #6a8499; }
+  .admin {
+    margin-top: 16px; display: flex; gap: 6px; align-items: center;
+  }
+  .admin.hidden { display: none; }
+  .admin input {
+    flex: 1; min-width: 0; padding: 8px 10px; font-size: 13px; text-align: center;
+    color: #e8f4ff; background: rgba(255,255,255,.05);
+    border: 1px solid rgba(255,255,255,.12); border-radius: 8px; outline: none;
+    font-family: inherit;
+  }
+  .admin input:focus { border-color: rgba(53,224,255,.45); }
+  .admin button {
+    flex: 0 0 auto; padding: 8px 12px; font-size: 12px; font-weight: 700;
+    color: #cfeeff; background: rgba(53,224,255,.1);
+    border: 1px solid rgba(53,224,255,.3); border-radius: 8px;
+    cursor: pointer; font-family: inherit;
+  }
+  .admin button:hover { background: rgba(53,224,255,.2); }
+  .admin button:disabled { opacity: .5; cursor: default; }
+  /* 右下角隐蔽入口：看起来像装饰点 */
+  .secret {
+    position: absolute; right: 10px; bottom: 10px;
+    width: 14px; height: 14px; border: 0; padding: 0;
+    border-radius: 50%;
+    background: rgba(53, 224, 255, .12);
+    cursor: pointer;
+    opacity: .35;
+  }
+  .secret:hover { opacity: .7; background: rgba(53, 224, 255, .28); }
+  .err { margin-top: 12px; font-size: 12px; color: #ff8ec4; min-height: 1.2em; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="brand">零区冲突</div>
+    <div class="sub">房间较满 · 正在排队</div>
+    <div class="why">
+      为防止服务器卡顿、保证当前对局流畅，房间设置了人数上限。请耐心排队，有空位后会自动放行；入场前不会加载游戏资源。
+    </div>
+    <div class="pos" id="posNum">—<small>当前排队位次</small></div>
+    <div class="meta">
+      对局中 <b id="players">—</b> / <b id="cap">—</b> 人<br>
+      前方还有 <b id="ahead">—</b> 人等待
+    </div>
+    <div class="bar" aria-hidden="true"><i></i></div>
+    <div class="hint">有空位后将自动进入游戏</div>
+    <div class="admin hidden" id="adminBox">
+      <input id="adminCode" type="password" maxlength="32" placeholder="通行口令" autocomplete="off">
+      <button type="button" id="btnBypass">通行</button>
+    </div>
+    <div class="err" id="err"></div>
+    <button type="button" class="secret" id="btnSecret" title="" aria-label="通行"></button>
+  </div>
+<script>
+(function () {
+  var KEY = 'na_queue_ticket';
+  var timer = null;
+  var entering = false;
+  var adminShown = false;
+
+  function $(id) { return document.getElementById(id); }
+
+  function goPlay(token) {
+    if (entering) return;
+    entering = true;
+    var q = token ? ('?t=' + encodeURIComponent(token)) : '';
+    location.replace('/play' + q);
+  }
+
+  function render(d) {
+    $('players').textContent = d.players;
+    $('cap').textContent = d.cap;
+    $('posNum').innerHTML = (d.position > 0 ? String(d.position) : '—')
+      + '<small>当前排队位次</small>';
+    $('ahead').textContent = d.position > 0 ? Math.max(0, d.position - 1) : d.queue;
+  }
+
+  function showAdmin() {
+    if (adminShown) return;
+    adminShown = true;
+    $('adminBox').classList.remove('hidden');
+    setTimeout(function () { $('adminCode').focus(); }, 0);
+  }
+
+  function poll() {
+    var ticket = localStorage.getItem(KEY) || '';
+    var url = '/api/queue/status' + (ticket ? ('?ticket=' + encodeURIComponent(ticket)) : '');
+    fetch(url, { cache: 'no-store', credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.ticket) localStorage.setItem(KEY, d.ticket);
+        if (d.admitted) {
+          localStorage.removeItem(KEY);
+          goPlay(d.token);
+          return;
+        }
+        render(d);
+      })
+      .catch(function () {
+        $('err').textContent = '连接服务器失败，正在重试…';
+      });
+  }
+
+  fetch('/api/queue/enter', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ ticket: localStorage.getItem(KEY) || '' }),
+    cache: 'no-store',
+  })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (d.ticket) localStorage.setItem(KEY, d.ticket);
+      if (d.admitted) {
+        localStorage.removeItem(KEY);
+        goPlay(d.token);
+        return;
+      }
+      render(d);
+      timer = setInterval(poll, 2000);
+    })
+    .catch(function () {
+      $('err').textContent = '连接服务器失败，正在重试…';
+      timer = setInterval(poll, 2500);
+    });
+
+  window.addEventListener('beforeunload', function () {
+    if (timer) clearInterval(timer);
+  });
+
+  function tryBypass() {
+    if (entering) return;
+    var code = ($('adminCode').value || '').trim();
+    if (!code) { $('err').textContent = '请输入通行口令'; return; }
+    var btn = $('btnBypass');
+    btn.disabled = true;
+    fetch('/api/queue/bypass', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      cache: 'no-store',
+      body: JSON.stringify({ code: code, ticket: localStorage.getItem(KEY) || '' }),
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        btn.disabled = false;
+        if (!d.ok) {
+          $('err').textContent = d.text || '口令错误';
+          return;
+        }
+        localStorage.removeItem(KEY);
+        $('err').textContent = '';
+        goPlay(d.token);
+      })
+      .catch(function () {
+        btn.disabled = false;
+        $('err').textContent = '连接服务器失败，请重试';
+      });
+  }
+
+  $('btnBypass').addEventListener('click', tryBypass);
+  $('btnSecret').addEventListener('click', function (e) {
+    e.preventDefault();
+    showAdmin();
+  });
+  $('adminCode').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      tryBypass();
+    }
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter') return;
+    if (adminShown) return;
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'BUTTON')) return;
+    e.preventDefault();
+    showAdmin();
+  });
+})();
+</script>
+</body>
+</html>

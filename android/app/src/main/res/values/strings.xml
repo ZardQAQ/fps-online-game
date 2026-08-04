@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">零区冲突</string>
+    <string name="title_activity_main">零区冲突</string>
+    <string name="package_name">com.zard.neonarena</string>
+    <string name="custom_url_scheme">com.zard.neonarena</string>
+</resources>

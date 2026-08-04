@@ -1,0 +1,31 @@
+{
+  "name": "neon-arena-fps",
+  "version": "1.0.0",
+  "description": "3D 第一人称多人在线竞技射击游戏 — 单房间权威 Node 服务器 + Three.js 客户端",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node server/index.js",
+    "android:sync": "npx cap sync android",
+    "android:open": "npx cap open android",
+    "android:run": "npx cap run android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.4.2",
+    "@capacitor/app": "^8.1.1",
+    "@capacitor/browser": "^8.0.4",
+    "@capacitor/core": "^8.4.2",
+    "@capacitor/motion": "^8.0.0",
+    "express": "^4.19.2",
+    "ip2region": "^2.3.0",
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@capacitor/cli": "^8.4.2",
+    "esbuild": "^0.28.1"
+  }
+}

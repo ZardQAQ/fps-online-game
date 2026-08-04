@@ -1,0 +1,19 @@
+{
+  "appId": "com.zard.neonarena",
+  "appName": "零区冲突",
+  "webDir": "public",
+  "android": {
+    "allowMixedContent": true,
+    "backgroundColor": "#05070d"
+  },
+  "server": {
+    "androidScheme": "http",
+    "cleartext": true,
+    "allowNavigation": [
+      "fps.zard.loc.cc",
+      "fps2.zard.loc.cc",
+      "www.nodeloc.com",
+      "nodeloc.com"
+    ]
+  }
+}

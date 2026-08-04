@@ -1,0 +1,12 @@
+services:
+  neon-arena:
+    image: ${IMAGE:-neon-arena-fps:latest}
+    build: .
+    container_name: neon-arena
+    ports:
+      - "3066:3066"
+    environment:
+      - PORT=3066
+    volumes:
+      - /opt/neon-arena/data:/app/data
+    restart: unless-stopped

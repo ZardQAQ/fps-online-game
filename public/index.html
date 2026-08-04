@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="screen-orientation" content="landscape">
+<link rel="manifest" href="manifest.json">
+<title>零区冲突 · 3D 多人射击</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+</head>
+<body>
+<canvas id="cv"></canvas>
+
+<!-- ======== 主菜单 ======== -->
+<div id="menu" class="overlay">
+  <div class="menu-wrap">
+    <div class="menu-card">
+      <img class="menu-logo" src="icons/logo.png" alt="零区冲突" width="96" height="96" decoding="async">
+      <h1 class="title">零区冲突</h1>
+      <div class="subtitle">NEON ARENA · 3D 多人在线混战</div>
+      <div class="online-line">在线: <span id="menuOnline">0</span> 人 <span id="menuBossHint"></span></div>
+      <input id="nameInput" maxlength="12" placeholder="NodeLoc 站点昵称（登录后自动填入）" autocomplete="off" readonly>
+      <div id="oauthBar" class="oauth-bar">
+        <button type="button" id="btnNodeLoc" class="btn primary oauth-btn">NodeLoc 登录</button>
+        <div id="oauthSession" class="oauth-session hidden">
+          <span id="oauthStatus" class="oauth-status"></span>
+          <button type="button" id="btnOauthLogout" class="oauth-logout">退出</button>
+        </div>
+      </div>
+      <div id="passHint" class="pass-hint">必须使用 NodeLoc 账号登录后才能进入战斗</div>
+      <div id="menuProfile" class="menu-profile hidden">
+        <span>🪙 <b id="menuCoins">0</b></span>
+        <span id="menuLoginBadge" class="login-badge hidden">可领</span>
+      </div>
+      <div class="menu-actions">
+        <button id="btnLogin" class="btn ghost">🎁 七日登录</button>
+        <button id="btnWardrobe" class="btn ghost">👕 换装</button>
+      </div>
+      <button id="btnPlay" class="btn primary">🎮 进入战斗</button>
+      <button id="btnSpec" class="btn">👁️ 观战模式</button>
+      <button id="btnAbout" class="btn ghost">💭 关于作者</button>
+      <div class="help" id="helpDesktop">
+        <div class="help-title">操作说明</div>
+        <div class="help-grid">
+          <span>WASD 移动 · 空格 跳跃</span><span>鼠标左键 攻击 / 射击</span>
+          <span>1/2/3 或 滚轮 换武器</span><span>R 换弹 · T 检视 · 右键 开镜</span>
+          <span>V 第一/第三人称切换</span><span>E 商店 · ESC 设置</span>
+          <span>回车 聊天 · Tab 排行榜</span><span>油桶会爆炸，小心！</span>
+          <span>🧨手雷 🔆闪光弹 💨烟雾弹</span><span>投掷物冷却短，随便扔</span>
+        </div>
+        <div class="menu-tip">🖱️ 提示：鼠标回报率过高（如 1000Hz）可能导致视角突然飘逸，建议在驱动或鼠标设置中降为 125–500Hz</div>
+      </div>
+      <div class="help hidden" id="helpTouch">
+        <div class="help-title">触屏操作说明</div>
+        <div class="help-grid">
+          <span>左下摇杆：移动</span><span>屏幕拖动：视角</span>
+          <span>点武器栏切换 · R键换弹</span><span>◎ 开火 · ⤒ 跳跃 · R 换弹 · T 检视</span>
+          <span>🔭 开镜（狙击/电磁炮/充能步枪）</span><span>☰ 设置 · 可自定义按键布局</span>
+        </div>
+      </div>
+      <div id="menuErr" class="menu-err"></div>
+    </div>
+    <div class="menu-card menu-hist">
+      <div class="mh-title">🏆 历史排行榜</div>
+      <div id="menuHist" class="board-table"></div>
+      <div class="panel-hint">击杀数优先 · NodeLoc 账号跨局保存</div>
+    </div>
+  </div>
+</div>
+
+<!-- ======== 游戏 HUD ======== -->
+<div id="hud" class="hidden">
+  <div id="crosshair"><i class="ch t"></i><i class="ch b"></i><i class="ch l"></i><i class="ch r"></i><i class="ch dot"></i></div>
+  <div id="cookRing" class="hidden" aria-hidden="true">
+    <svg viewBox="0 0 64 64"><circle class="cook-ring-bg" cx="32" cy="32" r="28"/><circle class="cook-ring-fg" id="cookRingFg" cx="32" cy="32" r="28"/></svg>
+    <span id="cookRingText">0.0</span>
+  </div>
+  <div id="hitmarker">✕</div>
+  <div id="scope" class="hidden"><div class="scope-ring"></div><div class="scope-line h"></div><div class="scope-line v"></div></div>
+
+  <div id="vitals">
+    <div class="bar-row"><span class="bar-ico">❤️</span><div class="bar hp"><div id="hpFill"></div><span id="hpNum"></span></div></div>
+    <div class="bar-row"><span class="bar-ico">🛡️</span><div class="bar armor"><div id="arFill"></div><span id="arNum"></span></div></div>
+    <div class="bar-row" id="shieldRow"><span class="bar-ico">✨</span><div class="bar shield"><div id="shFill"></div><span id="shNum"></span></div></div>
+  </div>
+
+  <div id="weaponPanel">
+    <div class="wslot" id="slotMelee"><span class="wkey">1</span><span class="wico"></span><span class="wname"></span></div>
+    <div class="wslot" id="slotGun"><span class="wkey">2</span><span class="wico"></span><span class="wname"></span><span class="wammo"></span></div>
+    <div class="wslot" id="slotNade"><span class="wkey">3</span><span class="wico"></span><span class="wname"></span><span class="wammo"></span></div>
+    <div id="reloadBar" class="hidden"><div id="reloadFill"></div><span id="reloadText">换弹中…</span></div>
+  </div>
+
+  <div id="topLeft">
+    <div class="tl-row">
+      <div id="coinBox">🪙 <span id="coinNum">0</span></div>
+      <div id="onlineChip">👥 <span id="hudOnline">0</span></div>
+      <div id="dayChip">🌙 深夜</div>
+    </div>
+    <div id="buffRow"></div>
+  </div>
+  <div id="dmgDirWrap"></div>
+  <div id="bossFlash"></div>
+
+  <div id="killfeed"></div>
+
+  <div id="bossBar" class="hidden">
+    <div class="boss-name">👹 <span id="bossName"></span></div>
+    <div class="boss-hp"><div id="bossFill"></div></div>
+    <div id="bossWound" class="hidden">
+      <div class="boss-wound-label">因果延迟 · 未定之死 <span id="bossWoundNum">0</span></div>
+      <div class="boss-wound-hp"><div id="bossWoundFill"></div></div>
+    </div>
+  </div>
+  <div id="bossTimer" class="hidden"></div>
+
+  <div id="notice"></div>
+  <div id="bigNotice"></div>
+  <div id="interactHint" class="hidden">按 <b>E</b> 打开神秘商店</div>
+  <div id="protectHint" class="hidden">🛡️ 出生保护中</div>
+
+  <div id="dmgVignette"></div>
+  <div id="zombieTint"></div>
+  <div id="flashWhite"></div>
+  <div id="statLine"><span id="fpsNum"></span> · <span id="pingNum"></span></div>
+</div>
+
+<!-- ======== 聊天 ======== -->
+<div id="chatBox" class="hidden">
+  <div id="chatMsgs"></div>
+  <div id="chatInputRow" class="hidden">
+    <input id="chatInput" maxlength="120" placeholder="按回车发送，Esc 取消">
+    <button id="chatSendBtn">发送</button>
+  </div>
+</div>
+
+<!-- ======== 移动端触控层 ======== -->
+<div id="touchLayer" class="hidden">
+  <div id="joyHint"></div>
+  <div id="joyBase"><div id="joyStick"></div></div>
+  <button id="tMenu" class="tbtn tMenu" aria-label="设置">☰</button>
+  <button id="tBoard" class="tbtn tBoard" aria-label="排行榜">🏆</button>
+  <button id="tChat" class="tbtn tChat" aria-label="聊天">💬</button>
+  <button id="tScope" class="tbtn tScope hidden" aria-label="瞄准镜">🔭</button>
+  <button id="tReload" class="tbtn tReload" aria-label="换弹">R</button>
+  <button id="tInspect" class="tbtn tInspect" aria-label="检视">T</button>
+  <button id="tJump" class="tbtn tJump" aria-label="跳跃">⤒</button>
+  <button id="tFire" class="tbtn tFire" aria-label="开火">◎</button>
+  <!-- 观战自由视角升降（仅观战自由飞行时显示） -->
+  <button id="tUp" class="tbtn tUp hidden" aria-label="上升">⤒</button>
+  <button id="tDown" class="tbtn tDown hidden" aria-label="下降">⤓</button>
+</div>
+
+<!-- 触屏按键布局调整 -->
+<div id="touchEditBar" class="hidden">
+  <div class="touch-edit-tip">拖动按键到合适位置 · 可调整开火/跳跃/换弹/检视/开镜/菜单/摇杆区等</div>
+  <div class="touch-edit-actions">
+    <button id="btnTouchReset" type="button" class="btn small ghost">恢复默认</button>
+    <button id="btnTouchCancel" type="button" class="btn small">取消</button>
+    <button id="btnTouchSave" type="button" class="btn small primary">保存</button>
+  </div>
+</div>
+
+<!-- ======== 排行榜 ======== -->
+<div id="board" class="overlay panel hidden">
+  <div class="panel-card">
+    <button class="panel-close" id="boardClose" aria-label="关闭">×</button>
+    <div class="panel-title">🏆 排行榜 <span class="panel-sub">击杀数优先</span></div>
+    <div class="tabs"><button id="tabRt" class="tab active">实时榜</button><button id="tabHist" class="tab">历史榜</button></div>
+    <div id="boardRt" class="board-table"></div>
+    <div id="boardHist" class="board-table hidden"></div>
+    <div class="panel-hint">按 Tab 或点 × 关闭</div>
+  </div>
+</div>
+
+<!-- ======== 关于作者 ======== -->
+<div id="about" class="overlay panel hidden">
+  <div class="panel-card about-card">
+    <button class="panel-close" id="aboutClose" aria-label="关闭">×</button>
+    <div class="about-head">
+      <div class="about-avatar" aria-hidden="true">🎮</div>
+      <div class="about-name">zard</div>
+      <div class="about-tag">零区冲突 · 作者 · 目前大四毕业中</div>
+    </div>
+    <div class="about-contact">
+      <span>📧 联系邮箱(QQ)：</span>
+      <a href="mailto:3345972086@qq.com">3345972086@qq.com</a>
+    </div>
+    <div class="about-murmur">
+      <p>嗨，欢迎来到零区冲突。</p>
+      <p>我是 zard，这个游戏是我一个人搓出来的——写服务端、调 AI、画 UI、修 bug，基本上能自己干的都自己干了。现在大四，马上毕业，课不多的时候就在宿舍或图书馆继续改这个项目。</p>
+      <p>做这款游戏的初衷很简单：想做一个能和朋友随便开几局、又有点霓虹赛博味儿的网页 FPS。不用下载、打开浏览器就能玩，服务器空着的时候还会有一个叫 zard 的暖服 AI 陪练（对，就是我本人命名的，被打多了还会愣一下然后追着你跑）。</p>
+      <p>说实话，独立做小项目挺磨人的。有时候一个网络同步的 bug 能卡我一整天，有时候改完觉得「稳了」，上线五分钟就被玩家打回原形。但每次看到有人进房、聊天里冒出一两句「这游戏还行」，又觉得值得继续折腾。</p>
+      <p>如果你在游戏里发现了 bug、有想加的功能，或者只是想唠两句——欢迎发邮件或者加QQ找我。不一定秒回（要找工作），但一定会看。</p>
+      <p>谢谢你来玩。愿你在这张地图里多拿几个击杀，少被油桶炸飞几次。</p>
+      <div class="about-sign">—— zard · 2026</div>
+    </div>
+    <div class="about-actions">
+      <button type="button" id="btnArsenal" class="btn primary">🔫 枪械模型展</button>
+    </div>
+    <div class="panel-hint">按 Esc 或点 × 关闭</div>
+  </div>
+</div>
+
+<!-- ======== 枪械模型展 ======== -->
+<div id="arsenal" class="overlay panel hidden">
+  <div class="panel-card arsenal-card">
+    <button class="panel-close" id="arsenalClose" aria-label="关闭">×</button>
+    <div class="panel-title">🔫 枪械模型展</div>
+    <div class="arsenal-body">
+      <canvas id="arsenalCv" width="720" height="420"></canvas>
+      <div id="arsenalNames" class="arsenal-names"></div>
+    </div>
+    <div class="panel-hint">全部枪械 3D 模型自动旋转 · 点击名称可聚焦 · Esc / × 关闭</div>
+  </div>
+</div>
+
+<!-- ======== 七日登录 ======== -->
+<div id="loginPanel" class="overlay panel hidden">
+  <div class="panel-card login-card">
+    <button class="panel-close" id="loginClose" aria-label="关闭">×</button>
+    <div class="panel-title">🎁 七日登录</div>
+    <div id="loginHint" class="login-hint">输入昵称后可按日领取时装与金币</div>
+    <div id="loginDays" class="login-days"></div>
+    <button id="btnClaimLogin" class="btn primary">领取今日奖励</button>
+    <div id="loginMsg" class="login-msg"></div>
+    <div class="panel-hint">每日限领 1 次 · NodeLoc 账号保存 · 第 7 天后循环</div>
+  </div>
+</div>
+
+<!-- ======== 受保护昵称：输入密码解锁（已弃用，保留 DOM 避免旧缓存报错） ======== -->
+<div id="unlockPanel" class="overlay panel hidden" hidden aria-hidden="true">
+  <div class="panel-card small-card pass-card">
+    <button class="panel-close" id="unlockClose" aria-label="关闭">×</button>
+    <div class="panel-title">🔐 需要密码</div>
+    <div id="unlockHint" class="login-hint">已改为 NodeLoc 登录</div>
+    <input id="unlockInput" type="password" maxlength="32" placeholder="请输入密码" autocomplete="current-password" class="pass-field">
+    <button id="btnUnlock" class="btn primary">确认</button>
+    <div id="unlockMsg" class="login-msg"></div>
+  </div>
+</div>
+
+<!-- ======== 设置 / 修改昵称密码（已弃用） ======== -->
+<div id="passPanel" class="overlay panel hidden" hidden aria-hidden="true">
+  <div class="panel-card small-card pass-card">
+    <button class="panel-close" id="passClose" aria-label="关闭">×</button>
+    <div class="panel-title">🔐 昵称密码</div>
+    <div id="passPanelHint" class="login-hint">已改为 NodeLoc 登录</div>
+    <input id="passOldInput" type="password" maxlength="32" placeholder="当前密码（首次设置可留空）" autocomplete="current-password" class="pass-field">
+    <input id="passNewInput" type="password" maxlength="32" placeholder="新密码（至少 4 位）" autocomplete="new-password" class="pass-field">
+    <input id="passNew2Input" type="password" maxlength="32" placeholder="确认新密码" autocomplete="new-password" class="pass-field">
+    <button id="btnPassSave" class="btn primary">保存密码</button>
+    <button id="btnPassClear" class="btn ghost">取消密码保护</button>
+    <div id="passMsg" class="login-msg"></div>
+  </div>
+</div>
+
+<!-- ======== 主菜单换装 ======== -->
+<div id="wardrobe" class="overlay panel hidden">
+  <div class="panel-card wardrobe-card">
+    <button class="panel-close" id="wardrobeClose" aria-label="关闭">×</button>
+    <div class="panel-title">👕 换装 <span class="shop-coins">🪙 <span id="wardCoins">0</span></span></div>
+    <div class="tabs" id="wardTabs"></div>
+    <div class="shop-body">
+      <div id="wardStage">
+        <canvas id="wardCv" width="220" height="300"></canvas>
+        <div class="stage-cap">实时预览 · 悬停可试穿</div>
+      </div>
+      <div id="wardGrid"></div>
+    </div>
+    <div id="wardPager" class="ward-pager hidden">
+      <button type="button" id="wardPrev" class="btn small">上一页</button>
+      <span id="wardPageInfo">1 / 1</span>
+      <button type="button" id="wardNext" class="btn small">下一页</button>
+    </div>
+    <div id="wardMsg" class="login-msg"></div>
+    <div class="panel-hint">可直接购买时装 · 外观按 NodeLoc 账号永久保存 · 七日登录专属需签到获取</div>
+  </div>
+</div>
+
+<!-- ======== 神秘商店 ======== -->
+<div id="shop" class="overlay panel hidden">
+  <div class="panel-card shop-card">
+    <button class="panel-close" id="shopClose" aria-label="关闭">×</button>
+    <div class="panel-title">🧙 神秘商店 <span class="shop-coins">🪙 <span id="shopCoins">0</span></span></div>
+    <div class="tabs" id="shopTabs"></div>
+    <div class="shop-body">
+      <div id="shopStage">
+        <canvas id="shopCv" width="240" height="320"></canvas>
+        <div class="stage-cap">实时预览 · 悬停可试穿</div>
+      </div>
+      <div id="shopGrid"></div>
+    </div>
+    <div id="shopMsg"></div>
+    <div class="panel-hint">按 E 或 Esc 关闭 · 外观全场可见，按昵称永久保存</div>
+  </div>
+</div>
+
+<!-- ======== 死亡界面 ======== -->
+<div id="death" class="overlay hidden">
+  <div class="death-card">
+    <div class="death-title">你阵亡了</div>
+    <div id="deathBy"></div>
+    <div id="deathKeep" class="death-keep hidden"></div>
+    <div id="deathCount"></div>
+    <button id="btnDeathSpec" class="btn small">👁️ 观战等待</button>
+  </div>
+</div>
+
+<!-- ======== 观战条 ======== -->
+<div id="specBar" class="hidden">
+  <div id="specMode"></div>
+  <div id="specTarget"></div>
+  <!-- 桌面：键位提示 -->
+  <div class="spec-keys" id="specKeys">F 自由/跟随 · ←/→ 切换玩家 · V 视角 · ESC 设置 · <b id="btnSpecJoin">回车 加入战斗</b></div>
+  <!-- 手机：触屏观战控件 -->
+  <div class="spec-touch" id="specTouch">
+    <button id="specPrev" class="spec-btn" aria-label="上一个玩家">◀</button>
+    <button id="specFollowBtn" class="spec-btn wide">跟随</button>
+    <button id="specNext" class="spec-btn" aria-label="下一个玩家">▶</button>
+    <button id="specViewBtn" class="spec-btn">👁 视角</button>
+    <button id="specJoinBtn" class="spec-btn join">⚔ 加入</button>
+  </div>
+</div>
+
+<!-- ======== 设置 / 暂停 ======== -->
+<div id="pause" class="overlay hidden">
+  <div class="menu-card small-card">
+    <div class="pause-title">⚙️ 设置</div>
+    <div class="set-row"><span>🎵 背景音乐</span><button id="optMusic" class="opt-toggle">开</button></div>
+    <div class="set-row"><span>🔊 游戏音效</span><button id="optSfx" class="opt-toggle">开</button></div>
+    <div class="set-row"><span>📷 视角 (V)</span><button id="optView" class="opt-toggle">第一人称</button></div>
+    <div class="set-row"><span id="optSensLabel">🖱️ 灵敏度</span><input id="optSens" type="range" min="30" max="200" value="100"></div>
+    <div class="set-row" id="rowGyro"><span>🧭 陀螺仪瞄准</span><button id="optGyro" type="button" class="opt-toggle off">关</button></div>
+    <div class="set-row hidden" id="rowGyroSens"><span>🧭 陀螺仪灵敏度</span><input id="optGyroSens" type="range" min="30" max="250" value="100"></div>
+    <div class="set-row hidden" id="rowGyroInvert"><span>🔄 陀螺仪反转</span><button id="optGyroInvert" type="button" class="opt-toggle off">关</button></div>
+    <div class="set-row" id="rowTouchLayout"><span>🎮 按键布局</span><button id="btnTouchLayout" type="button" class="opt-toggle">调整</button></div>
+    <div class="set-row" id="rowLandscape"><span>📱 屏幕方向</span><button id="btnPauseLandscape" class="opt-toggle">进入全屏</button></div>
+    <button id="btnResume" class="btn primary">继续</button>
+    <button id="btnToMenu" class="btn">返回菜单</button>
+  </div>
+</div>
+<div id="lost" class="overlay hidden">
+  <div class="menu-card small-card">
+    <div class="pause-title">与服务器断开</div>
+    <div id="lostText" class="lost-text">正在重连…</div>
+  </div>
+</div>
+
+<!-- 移动端竖屏提示 -->
+<div id="rotateHint" class="overlay hidden">
+  <div class="rotate-card">
+    <div class="rotate-icon" aria-hidden="true">📱</div>
+    <div class="rotate-title">请旋转至横屏</div>
+    <div class="rotate-sub">请先点击下方「进入全屏」，再旋转手机至横屏</div>
+    <div class="rotate-tip">⚠️ 若仍无法旋转，请在控制中心关闭「竖屏锁定 / 方向锁定」</div>
+    <button id="btnRotateLandscape" class="btn primary rotate-btn" type="button">🔄 进入全屏</button>
+    <div id="rotateStatus" class="rotate-status"></div>
+  </div>
+</div>
+
+<script src="lib/three.min.js"></script>
+<script src="lib/GLTFLoader.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/models.js"></script>
+<script src="js/world.js"></script>
+<script src="js/effects.js"></script>
+<script src="js/game.js"></script>
+</body>
+</html>
