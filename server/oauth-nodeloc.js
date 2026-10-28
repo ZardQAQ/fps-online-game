@@ -4,9 +4,10 @@
 const crypto = require('crypto');
 
 const BASE_URL = (process.env.NodeLoc_URL || process.env.NODELOC_URL || 'https://www.nodeloc.com').replace(/\/$/, '');
-
+const CLIENT_ID = process.env.NodeLoc_CLIENT_ID || process.env.NODELOC_CLIENT_ID || '';
+const CLIENT_SECRET = process.env.NodeLoc_CLIENT_SECRET || process.env.NODELOC_CLIENT_SECRET || '';
 const REDIRECT_URI = process.env.NodeLoc_REDIRECT_URI || process.env.NODELOC_REDIRECT_URI
-  || 'http://fps2.zard.loc.cc/oauth/nodeloc';
+  || 'https://fps2.zard.loc.cc/oauth/nodeloc';
 const SCOPE = process.env.NodeLoc_SCOPE || process.env.NODELOC_SCOPE || 'openid profile';
 const NATIVE_SCHEME = process.env.NATIVE_OAUTH_SCHEME || 'neonarena';
 const COOKIE_SESSION = 'na_nl';
@@ -124,6 +125,7 @@ function makeSessionToken(user) {
     name: user.name || user.username || '',
     trust_level: user.trust_level | 0,
     avatar_url: user.avatar_url || '',
+    provider: 'nodeloc',
     exp: Date.now() + SESSION_TTL_MS,
   });
 }
@@ -158,6 +160,7 @@ function userFromToken(token) {
     name: String(data.name || data.username || ''),
     trust_level: data.trust_level | 0,
     avatar_url: String(data.avatar_url || ''),
+    provider: 'nodeloc',
   };
 }
 
@@ -297,11 +300,12 @@ async function handleCallback(req, res) {
     const token = await exchangeCode(code);
     const user = await fetchUserInfo(token.access_token);
     const sessionToken = setSessionCookie(res, req, user);
+    try { require('./oauth-linuxdo').clearSessionCookie(res, req); } catch (_) { /* 另一套会话可能尚未加载 */ }
     const nameHint = String(user.username || user.name || '').slice(0, 12);
     if (native) {
       return finishNative(res, { t: sessionToken, name: nameHint }, '登录成功', '正在返回游戏 App…若未自动跳转请点下方按钮。');
     }
-    res.redirect(302, '/?oauth=1&name=' + encodeURIComponent(nameHint));
+    res.redirect(302, '/?oauth=1&provider=nodeloc&name=' + encodeURIComponent(nameHint));
   } catch (e) {
     console.error('[oauth-nodeloc]', e.message || e);
     const tip = e.message || '登录失败';
@@ -352,5 +356,5 @@ function route(req, res) {
 
 module.exports = {
   enabled, userFromReq, userFromToken, startLogin, handleCallback, logout, me, route,
-  loginStartUrl, makeSessionToken, REDIRECT_URI, CLIENT_ID, BASE_URL, NATIVE_SCHEME,
+  loginStartUrl, makeSessionToken, clearSessionCookie, REDIRECT_URI, CLIENT_ID, BASE_URL, NATIVE_SCHEME,
 };

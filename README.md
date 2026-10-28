@@ -1,10 +1,6 @@
 # 零区冲突 · NEON ARENA
-- **在线体验链接**
-http://fps.zard.loc.cc/
 
 3D 第一人称多人在线混战射击游戏。一个 URL，多个客户端直接进入同一房间开打 —— 无需注册、无需下载。
-
-> **项目来源**：本项目由 [kejilion/game-collection · neon-arena-fps](https://github.com/kejilion/game-collection/tree/main/games/neon-arena-fps) **二次开发**而来，在其基础上进行功能扩展与玩法改动。
 
 - **服务端**：Node.js（express + ws），单房间权威服务器，所有伤害/拾取/购买均在服务端判定
 - **客户端**：Three.js 第一人称，全部模型/贴图/音效程序化生成，零外部资源
@@ -150,7 +146,7 @@ location / {
 | --- | --- | --- |
 | `PORT` | 3066 | 监听端口 |
 | `QUEUE_CAP` | `8` | 对局真人达到该人数后，新访客先进轻量排队页（不下载游戏资源） |
-| `QUEUE_ADMIN_CODE` | `zard666` | 排队页通行口令，输入后免排队入场 |
+| `QUEUE_ADMIN_CODE` | （空） | 排队页通行口令；不设置则关闭免排队入口 |
 | `DATA_DIR` | `./data` | 排行榜/档案/封禁记录存储目录 |
 | `AC_MODE` | `on` | 设 `off` 关闭反作弊惩罚 |
 | `DECOY_ENABLED` | `on` | 设 `off` 关闭 Zard 假人 |
@@ -158,6 +154,10 @@ location / {
 | `NPC_TOKEN` | 随机生成 | 假人 join 鉴权密钥（一般无需手动设置） |
 | `AMIYA_NODELOC_ID` | `27048` | Amiya_desi 的 NodeLoc ID（召唤指令 / 击杀彩蛋） |
 | `ZARD_NODELOC_ID` | （空） | 作者 zard 的 NodeLoc ID；不设则按昵称 `zard` 识别 |
+| `LINUXDO_CLIENT_ID` / `LINUXDO_CLIENT_SECRET` | （空） | LinuxDo 登录；缺任一项则关闭该登录 |
+| `NODELOC_CLIENT_ID` / `NODELOC_CLIENT_SECRET` | （空） | NodeLoc 登录；缺任一项则关闭该登录 |
+
+OAuth 密钥和排队口令放在项目根目录的 `.env`（启动时自动读取，已有环境变量优先）。模板见 `.env.example`，`.env` 不要提交。`data/` 里的玩家档案、聊天记录和封禁记录同样只留在本机。
 
 游戏数值（武器伤害、BUFF 时长、BOSS 属性、商店价格、地图布局等）集中在 [server/config.js](server/config.js)，服务端加入时会把配置下发给客户端，改一处两端同步生效。
 
@@ -203,6 +203,9 @@ location / {
 
 **真人彩蛋：** NodeLoc 账号对应的 Amiya_desi 本人击杀该 BOSS 时，会收到一条仅自己可见的私密提示。
 
+**召唤指令（隐藏，鉴权，不广播、不占聊天冷却）：** 仅 **zard 本人**与 **Amiya_desi 本人**可用。公屏发送 `召唤嫉妒魔女`（兼容旧口令 `召唤嫉妒幻影`）或 `summon amiya`，可指定**下一次**刷新的 BOSS 必为嫉妒魔女。场上已有 BOSS 时等它倒下后生效；场上没有 BOSS 时约 3 秒后降临。他人触发会收到拒绝对白。**zard / Amiya_desi 进服时都会收到口令私密提示**（暖服假人不提示）。
+
+鉴权：Amiya 默认匹配 NodeLoc `27048`（可用环境变量 `AMIYA_NODELOC_ID` 覆盖）；zard 默认匹配昵称 `zard`，也可用 `ZARD_NODELOC_ID` 绑定作者 NodeLoc 账号。
 
 数值与文案在 [server/config.js](server/config.js) 的 `BOSSES.amiya` / `EGG_AUTH`；AI 与创口结算在 [server/world.js](server/world.js)。
 

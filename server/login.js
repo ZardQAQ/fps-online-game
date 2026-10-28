@@ -42,7 +42,7 @@ function oauthSiteName(oauth) {
 }
 
 function needOauth() {
-  return { ok: false, text: '请先使用 NodeLoc 登录', needOauth: true };
+  return { ok: false, text: '请先登录', needOauth: true };
 }
 
 /**
@@ -54,7 +54,7 @@ function checkAccess(ip, name, password, oauth) {
 
   const n = oauthSiteName(oauth);
   if (!n) {
-    return { ok: false, text: '无法获取 NodeLoc 站点昵称' };
+    return { ok: false, text: '无法获取站点昵称' };
   }
 
   const mine = board.peekByNodeLoc(nlId);
@@ -110,7 +110,7 @@ function profilePayload(ip, name, password, oauth) {
 
   const n = oauthSiteName(oauth);
   if (!n) {
-    return { ok: false, text: '无法获取 NodeLoc 站点昵称', ...oauthExtras(oauth) };
+    return { ok: false, text: '无法获取站点昵称', ...oauthExtras(oauth) };
   }
 
   const mine = board.peekByNodeLoc(nlId);

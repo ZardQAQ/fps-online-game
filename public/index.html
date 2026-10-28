@@ -19,20 +19,48 @@
 <!-- ======== 主菜单 ======== -->
 <div id="menu" class="overlay">
   <div class="menu-wrap">
-    <div class="menu-card">
+    <div class="menu-card menu-rooms">
+      <div class="mr-head">
+        <div class="mh-title">🚪 对战房间</div>
+        <span id="roomTotalBadge" class="mr-badge">1 房在线</span>
+      </div>
+      <div class="room-create-box">
+        <div class="rc-top">
+          <span class="rc-label">⚡ 创建专属房间</span>
+          <span id="roomAuthTag" class="rc-tag">需登录</span>
+        </div>
+        <div id="roomCreate" class="room-create">
+          <input id="roomNameInput" maxlength="12" placeholder="输入房间名（最多12字）" autocomplete="off">
+          <button type="button" id="btnCreateRoom" class="btn primary">+ 开房</button>
+        </div>
+        <label class="room-pass-opt" for="roomPassToggle">
+          <input type="checkbox" id="roomPassToggle">
+          <span>设置密码</span>
+        </label>
+        <input id="roomPassInput" class="hidden" type="password" maxlength="16" placeholder="房间密码（1-16位）" autocomplete="new-password">
+        <p id="roomCreateHint" class="room-hint">登录后可开房，游客只能进入。密码可选</p>
+      </div>
+      <div class="room-list-head">
+        <span>房间列表（上限 10 人/房）</span>
+        <span id="roomSelLabel" class="room-sel-label">当前：官方大厅</span>
+      </div>
+      <div id="roomList" class="room-list"></div>
+      <div class="panel-hint">点击房间可切换目标 · 空闲房间 20 秒自动回收</div>
+    </div>
+    <div class="menu-card menu-main">
       <img class="menu-logo" src="icons/logo.png" alt="零区冲突" width="96" height="96" decoding="async">
       <h1 class="title">零区冲突</h1>
       <div class="subtitle">NEON ARENA · 3D 多人在线混战</div>
       <div class="online-line">在线: <span id="menuOnline">0</span> 人 <span id="menuBossHint"></span></div>
-      <input id="nameInput" maxlength="12" placeholder="NodeLoc 站点昵称（登录后自动填入）" autocomplete="off" readonly>
+      <input id="nameInput" maxlength="12" placeholder="登录后显示昵称（游客昵称由系统分配，不可修改）" autocomplete="off" readonly>
       <div id="oauthBar" class="oauth-bar">
-        <button type="button" id="btnNodeLoc" class="btn primary oauth-btn">NodeLoc 登录</button>
+        <button type="button" id="btnNodeLoc" class="btn primary oauth-btn">登录</button>
         <div id="oauthSession" class="oauth-session hidden">
           <span id="oauthStatus" class="oauth-status"></span>
           <button type="button" id="btnOauthLogout" class="oauth-logout">退出</button>
         </div>
       </div>
-      <div id="passHint" class="pass-hint">必须使用 NodeLoc 账号登录后才能进入战斗</div>
+      <div id="passHint" class="pass-hint">NodeLoc 或 LinuxDo 登录可保存数据；游客登录不保存、不能发言、不能改名、不能开房</div>
       <div id="menuProfile" class="menu-profile hidden">
         <span>🪙 <b id="menuCoins">0</b></span>
         <span id="menuLoginBadge" class="login-badge hidden">可领</span>
@@ -68,8 +96,32 @@
     <div class="menu-card menu-hist">
       <div class="mh-title">🏆 历史排行榜</div>
       <div id="menuHist" class="board-table"></div>
-      <div class="panel-hint">击杀数优先 · NodeLoc 账号跨局保存</div>
+      <div class="panel-hint">击杀数优先 · 登录账号跨局保存，游客不计入</div>
     </div>
+  </div>
+</div>
+
+<!-- ======== 选择登录方式 ======== -->
+<div id="authPick" class="overlay panel hidden">
+  <div class="panel-card auth-pick">
+    <button class="panel-close" id="authPickClose" type="button" aria-label="关闭">×</button>
+    <div class="panel-title">选择登录方式</div>
+    <div class="login-hint">NodeLoc / LinuxDo 会保存数据。游客不保存、不能发言、不能改名、不能开房。</div>
+    <button type="button" id="btnPickNodeLoc" class="btn primary auth-choice">
+      <img class="auth-logo nodeloc" src="icons/nodeloc.png" alt="" width="22" height="22">
+      <span class="auth-label">NodeLoc 登录</span>
+    </button>
+    <button type="button" id="btnPickLinuxDo" class="btn primary auth-choice">
+      <img class="auth-logo linuxdo" src="icons/linuxdo.svg" alt="" width="22" height="22">
+      <span class="auth-label">LinuxDo 登录</span>
+    </button>
+    <button type="button" id="btnGuest" class="btn auth-choice" title="不保存数据，不能局内发言，不能修改昵称，不能开房">
+      <svg class="auth-logo guest" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+        <circle cx="12" cy="8" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8"/>
+        <path d="M5.5 19.2c1.2-3.2 3.5-4.7 6.5-4.7s5.3 1.5 6.5 4.7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+      </svg>
+      <span class="auth-label">游客登录</span>
+    </button>
   </div>
 </div>
 
@@ -194,7 +246,7 @@
     <div class="about-murmur">
       <p>嗨，欢迎来到零区冲突。</p>
       <p>我是 zard，这个游戏是我一个人搓出来的——写服务端、调 AI、画 UI、修 bug，基本上能自己干的都自己干了。现在大四，马上毕业，课不多的时候就在宿舍或图书馆继续改这个项目。</p>
-      <p>做这款游戏的初衷很简单：想做一个能和朋友随便开几局、又有点霓虹赛博味儿的网页 FPS。不用下载、打开浏览器就能玩，服务器空着的时候还会有一个叫 zard 的暖服 AI 陪练（对，就是我本人命名的，被打多了还会愣一下然后追着你跑）。</p>
+      <p>做这款游戏的初衷很简单：想做一个能和朋友随便开几局、又有点霓虹赛博味儿的网页 FPS。不用下载、打开浏览器就能玩。</p>
       <p>说实话，独立做小项目挺磨人的。有时候一个网络同步的 bug 能卡我一整天，有时候改完觉得「稳了」，上线五分钟就被玩家打回原形。但每次看到有人进房、聊天里冒出一两句「这游戏还行」，又觉得值得继续折腾。</p>
       <p>如果你在游戏里发现了 bug、有想加的功能，或者只是想唠两句——欢迎发邮件或者加QQ找我。不一定秒回（要找工作），但一定会看。</p>
       <p>谢谢你来玩。愿你在这张地图里多拿几个击杀，少被油桶炸飞几次。</p>
@@ -229,7 +281,19 @@
     <div id="loginDays" class="login-days"></div>
     <button id="btnClaimLogin" class="btn primary">领取今日奖励</button>
     <div id="loginMsg" class="login-msg"></div>
-    <div class="panel-hint">每日限领 1 次 · NodeLoc 账号保存 · 第 7 天后循环</div>
+    <div class="panel-hint">每日限领 1 次 · 登录账号保存 · 第 7 天后循环</div>
+  </div>
+</div>
+
+<!-- ======== 加密房间：进入 / 观战前输入密码 ======== -->
+<div id="roomGate" class="overlay panel hidden">
+  <div class="panel-card small-card pass-card">
+    <button class="panel-close" id="roomGateClose" type="button" aria-label="关闭">×</button>
+    <div class="panel-title">🔐 房间密码</div>
+    <div id="roomGateHint" class="login-hint">该房间需要密码才能进入</div>
+    <input id="roomGateInput" type="password" maxlength="16" placeholder="输入房间密码" autocomplete="off" class="pass-field">
+    <button id="roomGateOk" type="button" class="btn primary">确认</button>
+    <div id="roomGateMsg" class="login-msg"></div>
   </div>
 </div>
 
@@ -279,7 +343,7 @@
       <button type="button" id="wardNext" class="btn small">下一页</button>
     </div>
     <div id="wardMsg" class="login-msg"></div>
-    <div class="panel-hint">可直接购买时装 · 外观按 NodeLoc 账号永久保存 · 七日登录专属需签到获取</div>
+    <div class="panel-hint">可直接购买时装 · 外观按登录账号永久保存 · 七日登录专属需签到获取</div>
   </div>
 </div>
 

@@ -158,8 +158,15 @@
   let oauthEnabled = true;
   let oauthLoginUrl = '/oauth/nodeloc';
   let oauthNativeLoginUrl = '';
+  let linuxdoLoginUrl = '/oauth/linuxdo';
+  let linuxdoNativeLoginUrl = '';
+  let nodelocEnabled = true;
+  let linuxdoEnabled = true;
   let oauthToken = '';
   try { oauthToken = localStorage.getItem(NL_TOKEN_KEY) || ''; } catch (_) { oauthToken = ''; }
+  let guestMode = false;
+  let guestName = '';
+  let guestJoinQueued = false;
   let reconnectTimer = null;
   let wardTab = 'all';
   let wardPage = 0;
@@ -174,6 +181,13 @@
   let lastKillerText = '';
   let pendingKeepGun = null;   // 商店枪保留提示（死亡界面与消息时序）
   let rejoinWanted = false;
+  let selectedRoomId = 'official';
+  let roomCap = 10;
+  let hasServerRooms = false;
+  let roomList = [{ id: 'official', name: '官方大厅', official: true, players: 0, spectators: 0, cap: 10, owner: '官方' }];
+  const roomPassCache = new Map();
+  let roomGateMode = 'play';
+  let pendingRoomPass = '';
   let kickedText = null;        // 被反作弊踢出/封禁的原因（断线重连提示优先展示）
   let pingMs = 0, lastPingAt = 0;
   let dayBase = 0, dayAt = 0, dayMs = 600000;
@@ -223,7 +237,8 @@
     ws.onopen = () => {
       wsOk = true;
       $('lost').classList.add('hidden');
-      if (rejoinWanted && myName && isOauthLoggedIn()) send({ type: 'join', name: myName, password: '' });
+      if (rejoinWanted && myName && isOauthLoggedIn()) send(joinMsg());
+      else if (guestMode && !isOauthLoggedIn()) send({ type: 'guest_login' });
       else if (mode === 'menu') requestMenuProfile();
     };
     ws.onmessage = e => {
@@ -266,10 +281,78 @@
       case 'state': onState(m); break;
       case 'joined':
         myId = m.id; myName = m.name;
-        localStorage.setItem('na_name', myName);
+        if (m.roomId) selectedRoomId = m.roomId;
+        if (m.guest) {
+          guestMode = true;
+          guestName = m.name || '';
+          if ($('nameInput')) {
+            $('nameInput').value = guestName;
+            $('nameInput').readOnly = true;
+          }
+        } else {
+          guestMode = false;
+          guestName = '';
+          localStorage.setItem('na_name', myName);
+          if ($('nameInput')) $('nameInput').value = myName;
+        }
         you = m.you; rejoinWanted = false;
         profileLocked = false;
+        updateOauthUi();
+        updatePassHint();
         enterPlay();
+        break;
+      case 'guest':
+        if (m.cleared) break;
+        if (!m.ok) {
+          if (!isOauthLoggedIn()) {
+            guestMode = false;
+            guestName = '';
+            myName = '';
+            if ($('nameInput')) $('nameInput').value = '';
+          }
+          if (m.text) $('menuErr').textContent = m.text;
+          updateOauthUi();
+          updatePassHint();
+          syncGuestChatLock();
+          guestJoinQueued = false;
+          break;
+        }
+        if (isOauthLoggedIn()) { guestJoinQueued = false; break; }
+        guestMode = true;
+        guestName = m.name || '';
+        myName = guestName;
+        if ($('nameInput')) {
+          $('nameInput').value = guestName;
+          $('nameInput').readOnly = true;
+        }
+        $('menuErr').textContent = '';
+        updateOauthUi();
+        updatePassHint();
+        syncGuestChatLock();
+        if (guestJoinQueued && mode === 'menu') {
+          guestJoinQueued = false;
+          doJoinPlay();
+        } else if (rejoinWanted && mode !== 'menu') send(joinMsg());
+        break;
+      case 'rooms':
+        hasServerRooms = true;
+        renderRooms(m);
+        break;
+      case 'room_created':
+        if (m.ok && m.room && m.room.id) {
+          selectedRoomId = m.room.id;
+          if (pendingRoomPass) roomPassCache.set(m.room.id, pendingRoomPass);
+          pendingRoomPass = '';
+          if ($('roomNameInput')) $('roomNameInput').value = '';
+          if ($('roomPassInput')) $('roomPassInput').value = '';
+          if ($('roomPassToggle')) $('roomPassToggle').checked = false;
+          if ($('roomPassInput')) $('roomPassInput').classList.add('hidden');
+          if ($('roomCreateHint')) {
+            $('roomCreateHint').textContent = '已创建房间，正在进入…';
+            $('roomCreateHint').className = 'room-hint ok';
+          }
+          doJoinPlay();
+        }
         break;
       case 'spec': mode = 'spec'; enterSpec(); break;
       case 'left': backToMenu(); break;
@@ -336,7 +419,20 @@
       case 'board': renderBoard(m); break;
       case 'shopmsg': shopMsg(m.text, m.ok); if (m.ok) G.audio.buy(); else G.audio.deny(); break;
       case 'err':
+        if (m.needRoomPassword) {
+          if (m.roomId) {
+            roomPassCache.delete(m.roomId);
+            selectedRoomId = m.roomId;
+          }
+          openRoomGate(m.text || '该房间需要密码');
+          $('menuErr').textContent = m.text || '';
+          break;
+        }
         $('menuErr').textContent = m.text || '';
+        if ($('roomCreateHint') && /房|厅/.test(m.text || '')) {
+          $('roomCreateHint').textContent = m.text;
+          $('roomCreateHint').className = 'room-hint warn';
+        }
         if (m.needOauth) highlightNeedOauth(m.text);
         break;
       case 'kicked': kickedText = m.text || '你已被移出对局'; rejoinWanted = false; break;
@@ -401,6 +497,7 @@
       camera.lookAt(0, 0, 0);
       renderLoginDays();
       requestMenuProfile();
+      if (mode === 'menu') startMenuDemo();
     }
   }
 
@@ -408,8 +505,10 @@
     if (!isOauthLoggedIn()) return '';
     return String(oauthUser.username || oauthUser.name || '').slice(0, 12);
   }
+  function isGuest() { return guestMode && !isOauthLoggedIn(); }
   function menuName() {
     if (isOauthLoggedIn()) return siteName();
+    if (isGuest()) return (guestName || '').slice(0, 12);
     return ($('nameInput').value.trim() || myName || '').slice(0, 12);
   }
   function syncSiteName() {
@@ -421,17 +520,32 @@
   }
   function menuPass() { return ''; }
   function isOauthLoggedIn() { return !!(oauthUser && oauthUser.id != null); }
+  function providerLabel() {
+    if (oauthUser && (oauthUser.provider === 'linuxdo' || String(oauthUser.id).startsWith('ld:'))) return 'LinuxDo';
+    return 'NodeLoc';
+  }
   function applyOauthState(m) {
-    if (m && m.enabled === false) oauthEnabled = false;
+    if (m && m.nodelocEnabled != null) nodelocEnabled = !!m.nodelocEnabled;
+    if (m && m.linuxdoEnabled != null) linuxdoEnabled = !!m.linuxdoEnabled;
+    if (m && m.nodelocEnabled == null && m.linuxdoEnabled == null && m.enabled === false) nodelocEnabled = false;
+    oauthEnabled = nodelocEnabled || linuxdoEnabled;
     if (m && m.loginUrl) oauthLoginUrl = m.loginUrl;
     if (m && m.nativeLoginUrl) oauthNativeLoginUrl = m.nativeLoginUrl;
+    if (m && m.linuxdoLoginUrl) linuxdoLoginUrl = m.linuxdoLoginUrl;
+    if (m && m.linuxdoNativeLoginUrl) linuxdoNativeLoginUrl = m.linuxdoNativeLoginUrl;
     if (m && m.loggedIn && m.user) {
+      const wasGuest = guestMode;
       oauthUser = m.user;
+      guestMode = false;
+      guestName = '';
       syncSiteName();
+      if (wasGuest) send({ type: 'guest_logout' });
     } else if (m && m.loggedIn === false) {
       oauthUser = null;
-      if ($('nameInput')) $('nameInput').value = '';
-      myName = '';
+      if (!guestMode) {
+        if ($('nameInput')) $('nameInput').value = '';
+        myName = '';
+      }
     }
     updateOauthUi();
     updatePassHint();
@@ -450,8 +564,7 @@
         return u.toString();
       } catch (_) { /* fall through */ }
     }
-    // 回调域名与联机域名可能不同，优先走 NodeLoc 已登记的回调站
-    return 'http://fps2.zard.loc.cc/oauth/nodeloc?native=1';
+    return 'https://fps2.zard.loc.cc/oauth/nodeloc?native=1';
   }
   async function openNativeOauth(url) {
     const Browser = capPlugin('Browser');
@@ -486,7 +599,8 @@
       myName = name;
       try { localStorage.setItem('na_name', myName); } catch (_) { /* ignore */ }
     }
-    $('menuErr').textContent = 'NodeLoc 登录成功';
+    const prov = u.searchParams.get('provider') === 'linuxdo' ? 'LinuxDo' : 'NodeLoc';
+    $('menuErr').textContent = prov + ' 登录成功';
     reconnectNow();
     return true;
   }
@@ -507,20 +621,70 @@
     const status = $('oauthStatus');
     const logout = $('btnOauthLogout');
     if (!btn) return;
+    const guestBtn = $('btnGuest');
+    if (session) session.classList.remove('guest');
     if (isOauthLoggedIn()) {
       btn.classList.add('hidden');
+      if (guestBtn) guestBtn.classList.add('hidden');
       if (session) session.classList.remove('hidden');
       if (status) {
         const name = oauthUser.username || oauthUser.name || oauthUser.id;
-        status.textContent = 'NodeLoc · ' + name;
+        status.textContent = providerLabel() + ' · ' + name;
         status.title = '已登录：' + name;
+      }
+      if (logout) logout.textContent = '退出';
+    } else if (guestMode) {
+      btn.classList.add('hidden');
+      if (guestBtn) guestBtn.classList.add('hidden');
+      if (session) {
+        session.classList.remove('hidden');
+        session.classList.add('guest');
+      }
+      if (status) {
+        status.textContent = guestName ? ('游客 · ' + guestName + ' · 不存档') : '游客 · 分配昵称中';
+        status.title = '游客不保存数据，不能局内发言，不能修改昵称';
       }
       if (logout) logout.textContent = '退出';
     } else {
       btn.classList.remove('hidden');
-      btn.textContent = oauthEnabled ? 'NodeLoc 登录' : '登录未配置';
-      btn.disabled = !oauthEnabled;
+      btn.textContent = '登录';
+      btn.disabled = false;
+      if (guestBtn) guestBtn.classList.remove('hidden');
       if (session) session.classList.add('hidden');
+    }
+    updateRoomCreateUi();
+  }
+  function updateRoomCreateUi() {
+    const btn = $('btnCreateRoom');
+    const hint = $('roomCreateHint');
+    const input = $('roomNameInput');
+    const tag = $('roomAuthTag');
+    if (!btn) return;
+    const ok = isOauthLoggedIn() && !isGuest();
+    btn.disabled = false;
+    if (input) input.disabled = false;
+    if (tag) {
+      if (ok) {
+        tag.textContent = '可创建';
+        tag.className = 'rc-tag ok';
+      } else if (isGuest()) {
+        tag.textContent = '游客不可用';
+        tag.className = 'rc-tag warn';
+      } else {
+        tag.textContent = '需登录';
+        tag.className = 'rc-tag';
+      }
+    }
+    if (!hint) return;
+    if (isGuest()) {
+      hint.textContent = '游客无法开房，可直接选择下方房间进入';
+      hint.className = 'room-hint warn';
+    } else if (!isOauthLoggedIn()) {
+      hint.textContent = '登录后可开房 · 游客只能进入已有房间';
+      hint.className = 'room-hint';
+    } else {
+      hint.textContent = '每房最多 10 人 · 空房 20 秒后自动关闭';
+      hint.className = 'room-hint ok';
     }
   }
   function highlightNeedOauth(text) {
@@ -528,7 +692,7 @@
     if (text) $('menuErr').textContent = text;
     const hint = $('passHint');
     if (hint) {
-      hint.textContent = text || '请先使用 NodeLoc 登录';
+      hint.textContent = text || '请先登录';
       hint.className = 'pass-hint warn';
     }
   }
@@ -541,6 +705,53 @@
       return;
     }
     location.href = oauthLoginUrl || '/oauth/nodeloc';
+  }
+  function nativeUrl(url, fallback) {
+    if (url && /^https?:\/\//i.test(url)) {
+      try {
+        const u = new URL(url);
+        u.searchParams.set('native', '1');
+        return u.toString();
+      } catch (_) { /* fall through */ }
+    }
+    return fallback;
+  }
+  function goLinuxDoLogin() {
+    if (!linuxdoEnabled) {
+      highlightNeedOauth('LinuxDo 登录未配置');
+      return;
+    }
+    const url = IS_NATIVE_APP
+      ? (linuxdoNativeLoginUrl || nativeUrl(linuxdoLoginUrl, 'https://fps2.zard.loc.cc/auth/callback?native=1'))
+      : (linuxdoLoginUrl || 'https://fps2.zard.loc.cc/auth/callback');
+    if (IS_NATIVE_APP) {
+      openNativeOauth(url).catch((e) => {
+        $('menuErr').textContent = (e && e.message) || '无法打开登录页';
+        highlightNeedOauth($('menuErr').textContent);
+      });
+      return;
+    }
+    location.href = url;
+  }
+  function openAuthPick() {
+    if (isOauthLoggedIn() || guestMode) return;
+    const nl = $('btnPickNodeLoc');
+    const ld = $('btnPickLinuxDo');
+    if (nl) {
+      nl.disabled = !nodelocEnabled;
+      const label = nl.querySelector('.auth-label');
+      if (label) label.textContent = nodelocEnabled ? 'NodeLoc 登录' : 'NodeLoc 未配置';
+    }
+    if (ld) {
+      ld.disabled = !linuxdoEnabled;
+      const label = ld.querySelector('.auth-label');
+      if (label) label.textContent = linuxdoEnabled ? 'LinuxDo 登录' : 'LinuxDo 未配置';
+    }
+    $('authPick').classList.remove('hidden');
+  }
+  function closeAuthPick() {
+    const el = $('authPick');
+    if (el) el.classList.add('hidden');
   }
   async function logoutOauth() {
     if (IS_NATIVE_APP) {
@@ -557,31 +768,40 @@
     updateOauthUi();
     updatePassHint();
     updateMenuProfile(null);
-    $('menuErr').textContent = '已退出 NodeLoc 登录';
+    $('menuErr').textContent = '已退出登录';
     reconnectNow();
   }
   function updatePassHint() {
     const hint = $('passHint');
     if (!hint) return;
     if (isOauthLoggedIn()) {
-      hint.textContent = '游戏昵称固定为 NodeLoc 站点用户名';
+      hint.textContent = '游戏昵称固定为 ' + providerLabel() + ' 用户名';
       hint.className = 'pass-hint ok';
-    } else {
-      hint.textContent = '必须使用 NodeLoc 账号登录后才能进入战斗';
+    } else if (guestMode) {
+      hint.textContent = guestName
+        ? `游客「${guestName}」不保存数据，不能发言，不能改名`
+        : '正在分配游客昵称…不保存数据，不能发言，不能改名';
       hint.className = 'pass-hint warn';
+    } else {
+      hint.textContent = 'NodeLoc 或 LinuxDo 登录可保存数据；游客登录不保存、不能发言、不能改名';
+      hint.className = 'pass-hint';
     }
   }
-  /** 未登录 NodeLoc 时拦截；通过后直接执行 */
+  /** 七日登录 / 换装等需要存档的功能：游客与未登录都拦截 */
   function requireAuth(action) {
+    if (isGuest()) {
+      $('menuErr').textContent = '游客不保存数据，该功能需登录账号';
+      return;
+    }
     if (!isOauthLoggedIn()) {
-      highlightNeedOauth('请先使用 NodeLoc 登录');
+      highlightNeedOauth('请先登录');
       return;
     }
     action();
   }
   function requestMenuProfile() {
     const n = menuName();
-    if (!isOauthLoggedIn() || !n || !wsOk) {
+    if (isGuest() || !isOauthLoggedIn() || !n || !wsOk) {
       updateMenuProfile(null);
       updatePassHint();
       return;
@@ -738,7 +958,7 @@
       noneBtn.disabled = !you.eq[wardTab];
       noneBtn.onclick = () => {
         const n = menuName();
-        if (!n) { setWardMsg('请先登录 NodeLoc', false); return; }
+        if (!n) { setWardMsg('请先登录', false); return; }
         requireAuth(() => send({ type: 'menu_equip', name: n, slot: wardTab, id: null, password: menuPass() }));
       };
       none.appendChild(noneBtn);
@@ -801,7 +1021,7 @@
         btn.disabled = (you.coins | 0) < item.price;
         btn.onclick = () => {
           const n = menuName();
-          if (!n) { setWardMsg('请先登录 NodeLoc', false); return; }
+          if (!n) { setWardMsg('请先登录', false); return; }
           requireAuth(() => send({ type: 'menu_buy', name: n, id: item.id, password: menuPass() }));
         };
       } else if (equipped) {
@@ -815,7 +1035,7 @@
         btn.className = 'owned';
         btn.onclick = () => {
           const n = menuName();
-          if (!n) { setWardMsg('请先登录 NodeLoc', false); return; }
+          if (!n) { setWardMsg('请先登录', false); return; }
           requireAuth(() => send({ type: 'menu_equip', name: n, slot: item.slot, id: item.id, password: menuPass() }));
         };
       }
@@ -861,10 +1081,17 @@
 
   // ---------- 状态同步 ----------
   function onState(m) {
-    if (!defs) return;
+    if (!defs || mode === 'menu') return;
     dayBase = m.day || 0; dayAt = performance.now();
-    $('menuOnline').textContent = m.pl.length;
     if ($('hudOnline')) $('hudOnline').textContent = m.pl.length;
+    if (!hasServerRooms && Array.isArray(m.pl)) {
+      const shown = m.pl.length;
+      if ($('menuOnline')) $('menuOnline').textContent = String(shown);
+      if (roomList.length === 1 && roomList[0].official && roomList[0].players !== shown) {
+        roomList[0].players = shown;
+        renderRooms({ cap: roomCap, rooms: roomList });
+      }
+    }
     const seen = new Set();
     for (const s of m.pl) {
       seen.add(s.i);
@@ -1240,6 +1467,7 @@
     if (e) { e.flinchAt = now(); e.flinchDir = dir; }
   }
   function onFx(m) {
+    if (mode === 'menu') return;
     switch (m.k) {
       case 'shot': {
         if (m.id === myId) break;
@@ -1701,6 +1929,7 @@
     if ($('btnTouchReset')) $('btnTouchReset').onclick = () => resetTouchLayoutToDefault();
   }
   function enterPlay() {
+    stopMenuDemo();
     mode = 'play';
     me.cheatOn = false;
     $('menu').classList.add('hidden');
@@ -1715,9 +1944,11 @@
     updateTouchLayout();
     resetGyroBase();
     syncGyroListener();
+    syncGuestChatLock();
     requestLock();
   }
   function enterSpec() {
+    stopMenuDemo();
     mode = 'spec';
     me.cheatOn = false;
     $('menu').classList.add('hidden');
@@ -1748,6 +1979,8 @@
     $('pause').classList.add('hidden');
     $('about').classList.add('hidden');
     $('loginPanel').classList.add('hidden');
+    const authPick = $('authPick');
+    if (authPick) authPick.classList.add('hidden');
     $('wardrobe').classList.add('hidden');
     if ($('passPanel')) $('passPanel').classList.add('hidden');
     if ($('unlockPanel')) $('unlockPanel').classList.add('hidden');
@@ -1756,6 +1989,7 @@
     syncGyroListener();
     document.exitPointerLock && document.exitPointerLock();
     requestMenuProfile();
+    startMenuDemo();
   }
   function onMyDeath() {
     $('death').classList.remove('hidden');
@@ -2694,7 +2928,8 @@
 
   function isTyping() {
     const a = document.activeElement;
-    return a === $('chatInput') || a === $('nameInput');
+    return a === $('chatInput') || a === $('nameInput') || a === $('roomNameInput')
+      || a === $('roomPassInput') || a === $('roomGateInput');
   }
 
   document.addEventListener('keydown', e => {
@@ -2702,6 +2937,8 @@
     if (e.code === 'Escape') {
       if (!$('arsenal').classList.contains('hidden')) { toggleArsenal(false); return; }
       if (!$('about').classList.contains('hidden')) { toggleAbout(false); return; }
+      if ($('roomGate') && !$('roomGate').classList.contains('hidden')) { closeRoomGate(); return; }
+      if (!$('authPick').classList.contains('hidden')) { closeAuthPick(); return; }
       if (!$('loginPanel').classList.contains('hidden')) { toggleLoginPanel(false); return; }
       if (!$('wardrobe').classList.contains('hidden')) { toggleWardrobe(false); return; }
       if (!$('shop').classList.contains('hidden')) { toggleShop(false); return; }
@@ -2796,11 +3033,33 @@
   }
 
   // 聊天
+  function syncGuestChatLock() {
+    const guest = isGuest();
+    const btn = $('tChat');
+    if (btn) {
+      btn.classList.toggle('guest-off', guest);
+      btn.title = guest ? '游客无法发言' : '聊天';
+    }
+    if (guest) {
+      $('chatInputRow').classList.add('hidden');
+      if ($('chatInput')) $('chatInput').blur();
+    }
+  }
   function openChat() {
+    if (isGuest()) {
+      notice('游客无法发言');
+      return;
+    }
     $('chatInputRow').classList.remove('hidden');
     $('chatInput').focus();
   }
   function sendChatNow() {
+    if (isGuest()) {
+      $('chatInput').value = '';
+      $('chatInputRow').classList.add('hidden');
+      notice('游客无法发言');
+      return;
+    }
     const v = $('chatInput').value.trim();
     if (v) send({ type: 'chat', text: v });
     $('chatInput').value = '';
@@ -2821,31 +3080,222 @@
   $('nameInput').value = myName;
   updatePassHint();
   updateOauthUi();
+  function joinMsg() {
+    const roomId = selectedRoomId || 'official';
+    const roomPassword = roomPassCache.get(roomId) || '';
+    if (isGuest()) return { type: 'join', guest: true, roomId, roomPassword };
+    return { type: 'join', name: myName, password: '', roomId, roomPassword };
+  }
   function doJoinPlay() {
-    ensureGyroPermissionThen(() => send({ type: 'join', name: myName, password: '' }));
+    roomGateMode = 'play';
+    ensureGyroPermissionThen(() => send(joinMsg()));
+  }
+  function openRoomGate(text) {
+    const hint = $('roomGateHint');
+    if (hint) hint.textContent = roomGateMode === 'spec' ? '观战该房间需要密码' : '进入该房间需要密码';
+    const msg = $('roomGateMsg');
+    if (msg) msg.textContent = (text && text !== '该房间需要密码') ? text : '';
+    $('roomGate').classList.remove('hidden');
+    const input = $('roomGateInput');
+    if (input) { input.value = ''; input.focus(); }
+  }
+  function closeRoomGate() {
+    if ($('roomGate')) $('roomGate').classList.add('hidden');
+  }
+  function submitRoomGate() {
+    const pass = ($('roomGateInput') && $('roomGateInput').value || '').trim();
+    const msg = $('roomGateMsg');
+    if (!pass) {
+      if (msg) msg.textContent = '请输入房间密码';
+      return;
+    }
+    const id = selectedRoomId || 'official';
+    roomPassCache.set(id, pass);
+    closeRoomGate();
+    if (roomGateMode === 'spec') {
+      G.audio.init();
+      ensureGyroPermissionThen(() => send({ type: 'spectate', roomId: id, roomPassword: pass }));
+      return;
+    }
+    doJoinPlay();
+  }
+  function enterGuestMode() {
+    if (isOauthLoggedIn()) {
+      $('menuErr').textContent = '已登录，请直接进入战斗';
+      return;
+    }
+    guestMode = true;
+    guestName = '';
+    myName = '';
+    if ($('nameInput')) {
+      $('nameInput').value = '';
+      $('nameInput').readOnly = true;
+      $('nameInput').placeholder = '系统分配游客昵称，不可修改';
+    }
+    $('menuErr').textContent = '';
+    updateOauthUi();
+    updatePassHint();
+    send({ type: 'guest_login' });
+  }
+  function exitGuest() {
+    guestMode = false;
+    guestName = '';
+    myName = '';
+    if ($('nameInput')) {
+      $('nameInput').value = '';
+      $('nameInput').placeholder = '登录后显示昵称（游客昵称由系统分配，不可修改）';
+    }
+    send({ type: 'guest_logout' });
+    guestJoinQueued = false;
+    updateOauthUi();
+    updatePassHint();
+    syncGuestChatLock();
+    $('menuErr').textContent = '已退出游客';
   }
   $('btnPlay').onclick = () => {
     G.audio.init();
+    if (isGuest()) {
+      if (!guestName) {
+        guestJoinQueued = true;
+        $('menuErr').textContent = '正在分配游客昵称，请稍候';
+        send({ type: 'guest_login' });
+        return;
+      }
+      guestJoinQueued = false;
+      $('menuErr').textContent = '';
+      doJoinPlay();
+      return;
+    }
     if (!isOauthLoggedIn()) {
-      highlightNeedOauth('请先使用 NodeLoc 登录');
+      highlightNeedOauth('请先登录或使用游客登录');
       return;
     }
     syncSiteName();
     if (!myName) {
-      $('menuErr').textContent = '无法获取 NodeLoc 站点昵称，请重新登录';
+      $('menuErr').textContent = '无法获取站点昵称，请重新登录';
       return;
     }
     $('menuErr').textContent = '';
     requireAuth(doJoinPlay);
   };
-  $('btnSpec').onclick = () => { G.audio.init(); ensureGyroPermissionThen(() => send({ type: 'spectate' })); };
+  function displayRoomName(r) {
+    if (!r) return '官方大厅';
+    if (r.official && (!r.name || r.name === '官厅')) return '官方大厅';
+    return r.name || '未名房间';
+  }
+  function renderRooms(m) {
+    roomCap = (m && m.cap) || 10;
+    const list = (m && Array.isArray(m.rooms) && m.rooms.length)
+      ? m.rooms
+      : [{ id: 'official', name: '官方大厅', official: true, players: 0, spectators: 0, cap: roomCap, owner: '官方' }];
+    roomList = list;
+    if (!list.some(r => r.id === selectedRoomId)) selectedRoomId = 'official';
+    let total = 0;
+    const box = $('roomList');
+    if (box) box.innerHTML = '';
+    for (const r of list) {
+      const players = r.players | 0;
+      const humans = r.humans != null ? (r.humans | 0) : players;
+      const specs = r.spectators | 0;
+      const cap = r.cap || roomCap;
+      total += players;
+      if (!box) continue;
+      const full = humans >= cap;
+      const isSel = r.id === selectedRoomId;
+      const pct = Math.min(100, Math.round((players / cap) * 100));
+      const rName = displayRoomName(r);
+      const card = document.createElement('div');
+      card.className = 'room-row' + (r.official ? ' official' : ' custom') + (r.locked ? ' locked' : '') + (isSel ? ' selected' : '') + (full ? ' is-full' : '');
+      card.innerHTML =
+        '<div class="room-top">' +
+          '<span class="room-badge"></span>' +
+          '<span class="room-name"></span>' +
+          '<span class="room-count"></span>' +
+        '</div>' +
+        '<div class="room-bar"><div class="room-bar-fill"></div></div>' +
+        '<div class="room-bottom">' +
+          '<span class="room-sub"></span>' +
+          '<div class="room-ops">' +
+            '<button type="button" class="room-enter"></button>' +
+            '<button type="button" class="room-watch">👁️ 观战</button>' +
+          '</div>' +
+        '</div>';
+      card.querySelector('.room-badge').textContent = r.official ? '官方' : (r.locked ? '加密' : '自建');
+      card.querySelector('.room-name').textContent = rName;
+      card.querySelector('.room-count').textContent = `👥 ${players} / ${cap}`;
+      card.querySelector('.room-bar-fill').style.width = pct + '%';
+      const ownerLabel = (!r.owner || r.owner === '官家') ? '系统常驻' : r.owner;
+      card.querySelector('.room-sub').textContent =
+        (r.official ? '常驻混战' : ('房主：' + ownerLabel)) +
+        (r.locked ? ' · 需要密码' : '') +
+        (specs > 0 ? ` · 👁️ ${specs} 观战` : '');
+      const enter = card.querySelector('.room-enter');
+      enter.textContent = full ? '已满' : (isSel ? '⚔️ 进入' : '进入');
+      enter.disabled = full;
+      enter.onclick = (ev) => { ev.stopPropagation(); enterRoom(r.id); };
+      card.querySelector('.room-watch').onclick = (ev) => { ev.stopPropagation(); spectateRoom(r.id); };
+      card.onclick = () => {
+        selectedRoomId = r.id;
+        renderRooms({ cap: roomCap, rooms: roomList });
+      };
+      box.appendChild(card);
+    }
+    if (box && list.filter(r => !r.official).length === 0) {
+      const tip = document.createElement('div');
+      tip.className = 'room-empty-tip';
+      tip.innerHTML =
+        '<div class="ret-ico" aria-hidden="true">🛰️</div>' +
+        '<div class="ret-title">暂无玩家自建房间</div>' +
+        '<div class="ret-sub">登录 NodeLoc / LinuxDo 账号后可在上方创建专属房间，与好友同场竞技</div>' +
+        '<div class="ret-tags"><span>👥 10人上限</span><span>⚡ 即开即战</span><span>🔄 空房自动回收</span></div>';
+      box.appendChild(tip);
+    }
+    if (hasServerRooms) {
+      const online = $('menuOnline');
+      if (online) online.textContent = String(total);
+    }
+    if ($('roomTotalBadge')) {
+      $('roomTotalBadge').textContent = `${list.length} 房 · ${total} 人`;
+    }
+    const cur = list.find(r => r.id === selectedRoomId) || list[0];
+    if ($('roomSelLabel') && cur) {
+      $('roomSelLabel').textContent = '当前：' + displayRoomName(cur);
+    }
+    const play = $('btnPlay');
+    if (play) {
+      play.textContent = cur ? ('🎮 进入战斗 · ' + displayRoomName(cur)) : '🎮 进入战斗';
+      const seated = cur && cur.humans != null ? (cur.humans | 0) : (cur ? (cur.players | 0) : 0);
+      play.disabled = !!(cur && seated >= (cur.cap || roomCap));
+    }
+    const spec = $('btnSpec');
+    if (spec) {
+      spec.textContent = cur ? ('👁️ 观战模式 · ' + displayRoomName(cur)) : '👁️ 观战模式';
+    }
+  }
+  function enterRoom(id) {
+    selectedRoomId = id;
+    renderRooms({ cap: roomCap, rooms: roomList });
+    $('btnPlay').click();
+  }
+  function spectateRoom(id) {
+    roomGateMode = 'spec';
+    selectedRoomId = id;
+    renderRooms({ cap: roomCap, rooms: roomList });
+    G.audio.init();
+    ensureGyroPermissionThen(() => send({
+      type: 'spectate',
+      roomId: id || 'official',
+      roomPassword: roomPassCache.get(id || 'official') || '',
+    }));
+  }
+  $('btnSpec').onclick = () => spectateRoom(selectedRoomId || 'official');
   $('btnDeathSpec').onclick = () => { send({ type: 'spectate' }); };
   $('btnSpecJoin').onclick = () => joinFromSpec();
   $('btnLogin').onclick = () => { G.audio.init(); toggleLoginPanel(true); };
   $('loginClose').onclick = () => toggleLoginPanel(false);
   $('btnClaimLogin').onclick = () => {
     const n = menuName();
-    if (!n) { setLoginMsg('请先登录 NodeLoc', false); return; }
+    if (!n) { setLoginMsg('请先登录', false); return; }
     requireAuth(() => {
       myName = n;
       localStorage.setItem('na_name', n);
@@ -2854,16 +3304,95 @@
   };
   $('btnWardrobe').onclick = () => { G.audio.init(); toggleWardrobe(true); };
   $('wardrobeClose').onclick = () => toggleWardrobe(false);
-  if ($('btnNodeLoc')) $('btnNodeLoc').onclick = () => { G.audio.init(); goNodeLocLogin(); };
-  if ($('btnOauthLogout')) $('btnOauthLogout').onclick = () => { G.audio.init(); logoutOauth(); };
+  if ($('btnNodeLoc')) $('btnNodeLoc').onclick = () => { G.audio.init(); openAuthPick(); };
+  if ($('btnPickNodeLoc')) $('btnPickNodeLoc').onclick = () => { G.audio.init(); closeAuthPick(); goNodeLocLogin(); };
+  if ($('btnPickLinuxDo')) $('btnPickLinuxDo').onclick = () => { G.audio.init(); closeAuthPick(); goLinuxDoLogin(); };
+  if ($('authPickClose')) $('authPickClose').onclick = () => closeAuthPick();
+  if ($('btnGuest')) $('btnGuest').onclick = () => { G.audio.init(); closeAuthPick(); enterGuestMode(); };
+  if ($('btnCreateRoom')) $('btnCreateRoom').onclick = () => {
+    G.audio.init();
+    const hint = $('roomCreateHint');
+    if (!isOauthLoggedIn() || isGuest()) {
+      if (hint) {
+        hint.textContent = isGuest() ? '游客不可开房，请先退出游客并登录账号' : '请先登录账号再创建房间';
+        hint.className = 'room-hint warn';
+      }
+      if (!isOauthLoggedIn() && !isGuest()) openAuthPick();
+      return;
+    }
+    const name = ($('roomNameInput') && $('roomNameInput').value || '').trim();
+    if (!name) {
+      if (hint) {
+        hint.textContent = '请先填写房间名（最多12字）';
+        hint.className = 'room-hint warn';
+      }
+      if ($('roomNameInput')) $('roomNameInput').focus();
+      return;
+    }
+    const usePass = !!($('roomPassToggle') && $('roomPassToggle').checked);
+    const pass = usePass ? (($('roomPassInput') && $('roomPassInput').value || '').trim()) : '';
+    if (usePass && !pass) {
+      if (hint) {
+        hint.textContent = '已勾选设置密码，请填写 1-16 位密码';
+        hint.className = 'room-hint warn';
+      }
+      if ($('roomPassInput')) $('roomPassInput').focus();
+      return;
+    }
+    if (hint) {
+      hint.textContent = '正在创建房间…';
+      hint.className = 'room-hint ok';
+    }
+    pendingRoomPass = pass;
+    send({ type: 'create_room', name, password: pass });
+  };
+  if ($('roomPassToggle') && $('roomPassInput')) {
+    $('roomPassToggle').addEventListener('change', () => {
+      const on = $('roomPassToggle').checked;
+      $('roomPassInput').classList.toggle('hidden', !on);
+      if (on) $('roomPassInput').focus();
+      else $('roomPassInput').value = '';
+    });
+  }
+  if ($('roomNameInput')) {
+    $('roomNameInput').addEventListener('keydown', e => {
+      if (e.code === 'Enter' && $('btnCreateRoom')) $('btnCreateRoom').click();
+      e.stopPropagation();
+    });
+  }
+  if ($('roomPassInput')) {
+    $('roomPassInput').addEventListener('keydown', e => {
+      if (e.code === 'Enter' && $('btnCreateRoom')) $('btnCreateRoom').click();
+      e.stopPropagation();
+    });
+  }
+  if ($('roomGateClose')) $('roomGateClose').onclick = () => closeRoomGate();
+  if ($('roomGateOk')) $('roomGateOk').onclick = () => submitRoomGate();
+  if ($('roomGateInput')) {
+    $('roomGateInput').addEventListener('keydown', e => {
+      if (e.code === 'Enter') submitRoomGate();
+      e.stopPropagation();
+    });
+  }
+  renderRooms({ cap: roomCap, rooms: roomList });
+  if ($('btnOauthLogout')) $('btnOauthLogout').onclick = () => {
+    G.audio.init();
+    if (isGuest()) exitGuest();
+    else logoutOauth();
+  };
   $('wardPrev').onclick = () => { if (wardPage > 0) { wardPage--; renderWardrobe(); } };
   $('wardNext').onclick = () => { wardPage++; renderWardrobe(); };
   $('nameInput').addEventListener('keydown', e => { if (e.code === 'Enter') $('btnPlay').click(); e.stopPropagation(); });
   function joinFromSpec() {
-    if (!isOauthLoggedIn()) { backToMenu(); highlightNeedOauth('请先使用 NodeLoc 登录'); return; }
+    if (isGuest()) {
+      if (!guestName) { backToMenu(); $('menuErr').textContent = '请先游客登录'; return; }
+      ensureGyroPermissionThen(() => send(joinMsg()));
+      return;
+    }
+    if (!isOauthLoggedIn()) { backToMenu(); highlightNeedOauth('请先登录或使用游客登录'); return; }
     syncSiteName();
     requireAuth(() => {
-      ensureGyroPermissionThen(() => send({ type: 'join', name: myName, password: '' }));
+      ensureGyroPermissionThen(() => send(joinMsg()));
     });
   }
 
@@ -3646,6 +4175,189 @@
     }
   }
 
+  // ---------- 菜单背景：本地演示，不接收对局快照 ----------
+  const MENU_GUNS = ['pistol', 'mg', 'shotgun', 'sniper', 'sword', 'railgun'];
+  const MENU_COLORS = ['#ff6b6b', '#4dabf7', '#69db7c', '#ffd43b', '#da77f2', '#63e6e2'];
+  const MENU_PICKS = {
+    wep: ['pistol', 'shotgun', 'mg', 'sniper', 'sword', 'nade', 'flash', 'smoke'],
+    equip: ['health', 'armor', 'boots'],
+    buff: ['speed', 'rage', 'invis', 'jump', 'shield'],
+  };
+  let menuBots = [];
+  let menuDemoOn = false;
+  let menuDayAt = 0;
+
+  function clearLiveActors() {
+    for (const e of ents.values()) scene.remove(e.model.group);
+    ents.clear();
+    if (bossEnt) { scene.remove(bossEnt.model.group); bossEnt = null; }
+    const bossBar = $('bossBar');
+    if (bossBar) bossBar.classList.add('hidden');
+    const bossTimer = $('bossTimer');
+    if (bossTimer) bossTimer.classList.add('hidden');
+    for (const e of handEnts.values()) {
+      scene.remove(e.model.group);
+      if (e.tether) scene.remove(e.tether.mesh);
+      if (e.rift) scene.remove(e.rift.group);
+    }
+    handEnts.clear();
+    if (ckptMesh) ckptMesh.visible = false;
+    if (shadowMesh) shadowMesh.g.visible = false;
+    for (const e of projMeshes) scene.remove(e.g);
+    projMeshes.length = 0;
+    for (const e of nadeMeshes) scene.remove(e.g);
+    nadeMeshes.length = 0;
+    activeSmokes.length = 0;
+    G.audio.setIntensity(0);
+  }
+  function fillDemoPickups() {
+    const pts = defs.map.pickups || [];
+    for (let i = 0; i < pickupMeshes.length; i++) {
+      const pm = pickupMeshes[i];
+      const cat = (pts[i] && pts[i].cat) || 'wep';
+      const pool = MENU_PICKS[cat] || MENU_PICKS.wep;
+      const item = pool[i % pool.length];
+      if (!defs.weapons[item] && !defs.equips[item] && !defs.buffs[item]) continue;
+      if (pm.item === item && pm.mesh) continue;
+      if (pm.mesh) { scene.remove(pm.mesh); pm.mesh = null; }
+      pm.item = item;
+      pm.mesh = G.models.makePickup(item, defs);
+      pm.mesh.position.set(pm.pt.x, pm.pt.y || 0, pm.pt.z);
+      scene.add(pm.mesh);
+    }
+  }
+  function startMenuDemo() {
+    if (!worldBuilt || !defs || mode !== 'menu' || menuDemoOn) return;
+    clearLiveActors();
+    const phase = dayAt ? ((dayBase + (performance.now() - dayAt) / dayMs) % 1) : 0.38;
+    menuDayAt = performance.now() - phase * dayMs;
+    const spawns = (defs.map.spawns && defs.map.spawns.length) ? defs.map.spawns : [[0, 24], [24, 0], [-24, 0], [0, -24]];
+    const count = Math.min(TOUCH ? 4 : 6, spawns.length);
+    for (let i = 0; i < count; i++) {
+      const sp = spawns[(i * 2) % spawns.length];
+      const gun = MENU_GUNS[i % MENU_GUNS.length];
+      const model = G.models.makePlayer(MENU_COLORS[i % MENU_COLORS.length], '');
+      model.plate.visible = false;
+      G.models.setPlayerWeapon(model, gun);
+      scene.add(model.group);
+      const bot = {
+        model, gun,
+        pos: { x: sp[0], y: 0, z: sp[1] },
+        yaw: Math.random() * Math.PI * 2,
+        tx: sp[0], tz: sp[1],
+        think: 0.3 + Math.random() * 1.2,
+        shot: 0.6 + Math.random() * 1.8,
+        stuck: 0,
+        moving: false,
+      };
+      bot.pos.y = G.world.floorAt(bot.pos);
+      model.group.position.set(bot.pos.x, bot.pos.y, bot.pos.z);
+      model.group.rotation.y = bot.yaw;
+      menuBots.push(bot);
+    }
+    fillDemoPickups();
+    if (defs.map.barrels) G.world.setBarrels(defs.map.barrels.map(() => 1));
+    menuDemoOn = true;
+  }
+  function stopMenuDemo() {
+    if (!menuDemoOn && !menuBots.length) return;
+    if (menuDemoOn && menuDayAt) {
+      dayBase = ((performance.now() - menuDayAt) / dayMs) % 1;
+      dayAt = performance.now();
+    }
+    menuDemoOn = false;
+    for (const b of menuBots) scene.remove(b.model.group);
+    menuBots = [];
+  }
+  function nearestDemoFoe(b) {
+    let best = null, bestD = 46;
+    for (const o of menuBots) {
+      if (o === b) continue;
+      const d = Math.hypot(o.pos.x - b.pos.x, o.pos.z - b.pos.z);
+      if (d < bestD) { best = o; bestD = d; }
+    }
+    return best;
+  }
+  function tickMenuDemo(dt) {
+    if (!menuDemoOn) return;
+    const speed = (defs.rules && defs.rules.baseSpeed) || 6.2;
+    const eyeH = (defs.rules && defs.rules.eyeH) || 1.55;
+    const spawns = defs.map.spawns || [];
+    for (const b of menuBots) {
+      b.think -= dt;
+      if (b.think <= 0 && spawns.length) {
+        const sp = spawns[Math.floor(Math.random() * spawns.length)];
+        b.tx = sp[0] + (Math.random() - 0.5) * 5;
+        b.tz = sp[1] + (Math.random() - 0.5) * 5;
+        b.think = 3.2 + Math.random() * 4.5;
+        b.stuck = 0;
+      }
+      const dx = b.tx - b.pos.x, dz = b.tz - b.pos.z;
+      const dist = Math.hypot(dx, dz);
+      b.moving = dist > 0.85;
+      if (b.moving) {
+        const ox = b.pos.x, oz = b.pos.z;
+        const step = speed * dt;
+        G.world.moveStep(b.pos, dx / dist * step, dz / dist * step);
+        if (Math.hypot(b.pos.x - ox, b.pos.z - oz) < step * 0.22) {
+          b.stuck += dt;
+          if (b.stuck > 0.7) b.think = 0;
+        } else b.stuck = 0;
+        b.yaw = Math.atan2(-dx, -dz);
+      }
+      b.pos.y = G.world.floorAt(b.pos);
+      const slot = (defs.weapons[b.gun] && defs.weapons[b.gun].slot) || 'gun';
+      b.shot -= dt;
+      if (b.shot <= 0) {
+        const foe = nearestDemoFoe(b);
+        if (foe) {
+          const eye = { x: b.pos.x, y: b.pos.y + eyeH, z: b.pos.z };
+          const aim = { x: foe.pos.x, y: foe.pos.y + 1.15, z: foe.pos.z };
+          const dir = { x: aim.x - eye.x, y: aim.y - eye.y, z: aim.z - eye.z };
+          const len = Math.hypot(dir.x, dir.y, dir.z) || 1;
+          dir.x /= len; dir.y /= len; dir.z /= len;
+          if (slot === 'melee') {
+            if (len < 3.3) {
+              b.yaw = Math.atan2(-dir.x, -dir.z);
+              b.model.attackT = 0;
+              b.shot = 0.75;
+            } else b.shot = 0.35;
+          } else {
+            b.yaw = Math.atan2(-dir.x, -dir.z);
+            const hitT = G.world.rayObstacles(eye, dir, len + 0.2);
+            const endDist = Math.max(0.5, Math.min(len, hitT - 0.12));
+            const origin = [eye.x + dir.x * 0.55, eye.y - 0.12, eye.z + dir.z * 0.55];
+            const end = [eye.x + dir.x * endDist, eye.y + dir.y * endDist, eye.z + dir.z * endDist];
+            if (b.gun === 'railgun') {
+              G.fx.railBeam(origin, end);
+              G.fx.muzzle(V3(origin[0], origin[1], origin[2]), 0x7df9ff);
+              b.shot = 1.7 + Math.random() * 0.6;
+            } else if (b.gun === 'shotgun') {
+              for (let p = 0; p < 4; p++) {
+                const s = 0.07 * len;
+                G.fx.tracer(origin, [end[0] + (Math.random() - 0.5) * s, end[1] + (Math.random() - 0.5) * s * 0.45, end[2] + (Math.random() - 0.5) * s], '#ffc878');
+              }
+              G.fx.muzzle(V3(origin[0], origin[1], origin[2]));
+              b.shot = 1.05 + Math.random() * 0.35;
+            } else {
+              G.fx.tracer(origin, end, '#ffe0a0');
+              G.fx.muzzle(V3(origin[0], origin[1], origin[2]));
+              b.shot = b.gun === 'mg' ? 0.2 : (b.gun === 'sniper' ? 1.45 : 0.48);
+            }
+            G.fx.impactSpark(end, b.gun === 'railgun' ? '#7df9ff' : '#ffe6a8');
+            b.model.attackT = 0;
+          }
+        } else b.shot = 0.4;
+      }
+      b.model.group.position.set(b.pos.x, b.pos.y, b.pos.z);
+      let dyaw = b.yaw - b.model.group.rotation.y;
+      while (dyaw > Math.PI) dyaw -= Math.PI * 2;
+      while (dyaw < -Math.PI) dyaw += Math.PI * 2;
+      b.model.group.rotation.y += dyaw * Math.min(1, dt * 8);
+      G.models.animatePlayer(b.model, dt, b.moving, slot, 1);
+    }
+  }
+
   // ---------- 相机 ----------
   const TP_DIST = 3.4;
   function updateCamera(dt) {
@@ -3767,9 +4479,16 @@
       updateLocalChargeBeam();
     }
     netSync(dt);
-    // 昼夜推进（服务器同步 + 本地插值）
-    const dayT = (dayBase + (perfNow - dayAt) / dayMs) % 1;
-    G.world.setDay(dayT, scene);
+    // 菜单用本地昼夜；进房后才跟服务器
+    if (mode === 'menu') {
+      if (!menuDemoOn) startMenuDemo();
+      tickMenuDemo(dt);
+      const dayT = ((perfNow - menuDayAt) / dayMs) % 1;
+      G.world.setDay(dayT, scene);
+    } else {
+      const dayT = (dayBase + (perfNow - dayAt) / dayMs) % 1;
+      G.world.setDay(dayT, scene);
+    }
     G.world.updateAmbient(dt);
     renderMovingProjectiles(dt);
     renderEnts(dt);
@@ -3836,7 +4555,8 @@
     highlightNeedOauth(qs.get('oauth_error'));
   }
   if (qs.get('oauth') === '1') {
-    $('menuErr').textContent = 'NodeLoc 登录成功';
+    const label = qs.get('provider') === 'linuxdo' ? 'LinuxDo' : 'NodeLoc';
+    $('menuErr').textContent = label + ' 登录成功';
   }
   if (qs.get('name') && qs.get('oauth') === '1') {
     $('nameInput').value = qs.get('name');

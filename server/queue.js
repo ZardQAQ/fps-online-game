@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const TICKET_TTL_MS = 3 * 60 * 1000;
 const ADMIT_TTL_MS = 5 * 60 * 1000;
 const COOKIE = 'na_admit';
-const ADMIN_CODE = process.env.QUEUE_ADMIN_CODE || 'zard666';
+const ADMIN_CODE = process.env.QUEUE_ADMIN_CODE || '';
 const BYPASS_WINDOW_MS = 60 * 1000;
 const BYPASS_MAX_FAILS = 8;
 
@@ -153,7 +153,7 @@ function bypass(code, ticketId, ip) {
   if (bucket.fails >= BYPASS_MAX_FAILS) {
     return { ok: false, text: '尝试过多，请稍后再试' };
   }
-  if (String(code || '') !== ADMIN_CODE) {
+  if (!ADMIN_CODE || String(code || '') !== ADMIN_CODE) {
     bucket.fails++;
     return { ok: false, text: '口令错误' };
   }

@@ -5,6 +5,9 @@ services:
     container_name: neon-arena
     ports:
       - "3066:3066"
+    env_file:
+      - path: .env
+        required: false
     environment:
       - PORT=3066
     volumes:

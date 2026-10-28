@@ -73,10 +73,11 @@ function circlePushBoxes(pos, r, boxes) {
 }
 
 class World {
-  constructor(broadcast, sendTo, ac) {
+  constructor(broadcast, sendTo, ac, ids) {
     this.broadcast = broadcast;
     this.sendTo = sendTo;
     this.ac = ac;                 // 反作弊引擎（见 server/anticheat/）
+    this.ids = ids || null;       // 跨房间共享的玩家 id 序列
     this.players = new Map();
     this.nextId = 1;
     this.pickups = MAP.pickups.map(def => ({ def, item: null, avail: true, respawnAt: 0 }));
@@ -90,6 +91,12 @@ class World {
     this.grenades = [];
     this.unseenHands = [];   // amiya：不可视之手
     this.entId = 1;
+  }
+
+  allocId() {
+    const id = this.ids ? this.ids.n++ : this.nextId++;
+    if (this.ids) this.nextId = id + 1;
+    return id;
   }
 
   // 射线被障碍物/存活油桶挡住的最近距离
@@ -211,6 +218,40 @@ class World {
   }
 
   // ---------- 玩家生命周期 ----------
+  /** 游客昵称仅内存分配，不写入档案。extra 为其他连接已占、尚未进房的名字 */
+  guestNameOk(name, extra = []) {
+    const n = String(name || '').trim();
+    if (!/^游客\d{4}$/.test(n)) return false;
+    const low = n.toLowerCase();
+    if (DECOY.reservedName && low === String(DECOY.name || '').toLowerCase()) return false;
+    if (board.isNameTaken(n)) return false;
+    for (const p of this.players.values()) {
+      if (String(p.name || '').toLowerCase() === low) return false;
+    }
+    for (const raw of extra) {
+      if (String(raw || '').toLowerCase() === low) return false;
+    }
+    return true;
+  }
+
+  makeGuestName(extra = []) {
+    const used = new Set();
+    for (const p of this.players.values()) {
+      const n = String(p.name || '').trim().toLowerCase();
+      if (n) used.add(n);
+    }
+    for (const raw of extra) {
+      const n = String(raw || '').trim().toLowerCase();
+      if (n) used.add(n);
+    }
+    for (let i = 0; i < 50; i++) {
+      const name = '游客' + Math.floor(1000 + Math.random() * 9000);
+      if (used.has(name.toLowerCase())) continue;
+      if (this.guestNameOk(name, extra)) return name;
+    }
+    return '游客' + String(1000 + (this.nextId % 9000));
+  }
+
   makeViolationName() {
     for (let i = 0; i < 24; i++) {
       const name = ('违规昵称' + Math.floor(rand(100, 999))).slice(0, 12);
@@ -221,28 +262,37 @@ class World {
 
   addPlayer(rawName, ip, opts = {}) {
     const isDecoy = !!opts.isDecoy;
-    const nodelocId = opts.nodelocId != null && opts.nodelocId !== '' ? opts.nodelocId : null;
-    let name = isDecoy ? DECOY.name
-      : String(rawName || '').replace(/[<>&"']/g, '').trim().slice(0, 12) || ('玩家' + Math.floor(rand(100, 999)));
+    const guest = !!opts.guest && !isDecoy;
+    const nodelocId = (!guest && opts.nodelocId != null && opts.nodelocId !== '') ? opts.nodelocId : null;
     const normIp = normalizeIp(ip);
-    if (!isDecoy && DECOY.reservedName && !nodelocId && name.toLowerCase() === DECOY.name.toLowerCase()) {
-      return { error: '该昵称已被系统占用' };
-    }
+    let name;
     let nameReplaced = false;
-    if (!isDecoy && containsProfanity(name)) {
-      this.punishProfanityIp(normIp, '昵称辱骂', {
-        broadcast: `🚫 有玩家使用违规昵称进入，已替换为系统昵称并封IP禁言 ${CHAT_ABUSE_BAN_MIN} 分钟`,
-      });
-      name = this.makeViolationName();
-      nameReplaced = true;
+    if (isDecoy) {
+      name = DECOY.name;
+    } else if (guest) {
+      const extra = Array.isArray(opts.extraNames) ? opts.extraNames : [];
+      const preferred = String(opts.guestName || '').trim();
+      name = this.guestNameOk(preferred, extra) ? preferred : this.makeGuestName(extra);
+    } else {
+      name = String(rawName || '').replace(/[<>&"']/g, '').trim().slice(0, 12) || ('玩家' + Math.floor(rand(100, 999)));
+      if (DECOY.reservedName && !nodelocId && name.toLowerCase() === DECOY.name.toLowerCase()) {
+        return { error: '该昵称已被系统占用' };
+      }
+      if (containsProfanity(name)) {
+        this.punishProfanityIp(normIp, '昵称辱骂', {
+          broadcast: `🚫 有玩家使用违规昵称进入，已替换为系统昵称并封IP禁言 ${CHAT_ABUSE_BAN_MIN} 分钟`,
+        });
+        name = this.makeViolationName();
+        nameReplaced = true;
+      }
     }
     let coins = RULES.startCoins, owned = [], eq = { head: null, face: null, back: null, fx: null };
-    if (!isDecoy) {
-      if (nodelocId == null) return { error: '请先使用 NodeLoc 登录' };
+    if (!isDecoy && !guest) {
+      if (nodelocId == null) return { error: '请先登录' };
       // 先挡在线冲突，避免 bind 改名后才失败留下脏状态
       for (const op of this.players.values()) {
         if (op.nodelocId != null && String(op.nodelocId) === String(nodelocId)) {
-          return { error: '该 NodeLoc 账号已在游戏中' };
+          return { error: '该账号已在游戏中' };
         }
       }
       // 仅按 NodeLoc Token(nl:id) 绑档
@@ -258,8 +308,9 @@ class World {
       eq = Object.assign({ head: null, face: null, back: null, fx: null }, prof.eq);
       board.save();
     }
+    const pid = this.allocId();
     const p = {
-      id: this.nextId++, name, color: COLORS[(this.nextId + name.length) % COLORS.length],
+      id: pid, name, color: COLORS[(pid + name.length) % COLORS.length],
       pos: { x: 0, y: 0, z: 0 }, yaw: 0, pitch: 0, anim: 0,
       hp: RULES.maxHp, armor: 0, shield: 0, alive: true, deadUntil: 0, protectUntil: now() + RULES.protectMs,
       melee: 'fist', gun: null, nadeType: null, active: 'melee',
@@ -268,7 +319,7 @@ class World {
       kills: 0, deaths: 0, score: 0, streak: 0,
       coins, owned, eq,
       shopKeepGun: null,   // 商店购入枪械：死亡后可保留复活一次
-      lastChatAt: 0, lastSpawnIdx: -1, _cheat: false, ip: normIp, nodelocId, isDecoy,
+      lastChatAt: 0, lastSpawnIdx: -1, _cheat: false, ip: normIp, nodelocId, isDecoy, guest,
       rttMs: 80, posHist: [],
     };
     this.placeAtSpawn(p);
@@ -304,6 +355,12 @@ class World {
   /** 进场私密提示：必须在 sockets 绑定 playerId 之后调用，否则 sendTo 会丢包 */
   notifyJoinPrivTips(p) {
     if (!p || p.isDecoy) return;
+    if (p.guest) {
+      this.sendTo(p.id, {
+        type: 'priv',
+        text: '游客身份：本局数据不会保存，不能发言，不能修改昵称',
+      });
+    }
     if (p._nameReplacedTip) {
       this.sendTo(p.id, {
         type: 'priv',
@@ -338,8 +395,8 @@ class World {
   }
 
   saveProfile(p) {
-    if (p.isDecoy) return;
-    // NodeLoc 用 Token 绑档，游客用 IP；bind 保持昵称索引一致
+    if (!p || p.isDecoy || p.guest) return;
+    // NodeLoc 用 Token 绑档；游客不写档案
     if (p.name) {
       const bound = board.bindForPlayer(p, p.name);
       if (!bound.ok) {
@@ -360,6 +417,36 @@ class World {
 
   onDecoyKilled(attacker) {
     if (!attacker || attacker.isDecoy || this.hasDevTrophy(attacker)) return;
+    if (attacker.guest) {
+      attacker.decoyKills = (attacker.decoyKills | 0) + 1;
+      const n = attacker.decoyKills;
+      const left = DECOY.eggKills - n;
+      if (n === DECOY.hintKills) {
+        this.sendTo(attacker.id, {
+          type: 'priv',
+          text: `你已击杀 zard ${n} 次……再杀 ${left} 次 ${DECOY.eggHint} 会触发彩蛋（游客离场后不保留）`,
+        });
+      }
+      if (n >= DECOY.eggKills && !this.hasDevTrophy(attacker)) {
+        attacker.coins += DECOY.eggCoins;
+        attacker.owned.push(DECOY.trophyId);
+        this.sendYou(attacker);
+        this.sendTo(attacker.id, {
+          type: 'priv',
+          text: `🎉 彩蛋达成！本局获得 ${DECOY.eggCoins} 金币与「开发者奖杯」（游客离场后不保留）`,
+        });
+        this.sendTo(attacker.id, { type: 'got', kind: 'coin', name: `彩蛋奖励 +${DECOY.eggCoins} 金币`, desc: '' });
+        let decoyColor = '#aaaaaa';
+        for (const p of this.players.values()) if (p.isDecoy) { decoyColor = p.color; break; }
+        this.broadcast({
+          type: 'chat',
+          plain: true,
+          color: decoyColor,
+          text: '[zard:求求你别打我了，我只是作者开发出来的暖服ai] (´；ω；`)',
+        });
+      }
+      return;
+    }
     const prof = board.getForPlayer(attacker);
     prof.decoyKills = (prof.decoyKills || 0) + 1;
     board.save();
@@ -1203,6 +1290,10 @@ class World {
   }
 
   handleChat(p, m, connIp) {
+    if (p.guest) {
+      this.sendTo(p.id, { type: 'priv', text: '游客无法在局内发言' });
+      return;
+    }
     const ip = this.playerIp(p, connIp);
     if (ip && ip !== 'unknown' && this.ac.isChatMuted(ip)) {
       this.sendTo(p.id, {
@@ -1440,7 +1531,9 @@ class World {
     }
     if (!victim.isDecoy) {
       victim.deaths++;
-      const vProf = board.getForPlayer(victim); vProf.deaths++; board.save();
+      if (!victim.guest) {
+        const vProf = board.getForPlayer(victim); vProf.deaths++; board.save();
+      }
     }
     const shutdown = !victim.isDecoy && victim.streak >= 5 ? victim.streak : 0;
     victim.streak = 0;
@@ -1452,9 +1545,11 @@ class World {
       attacker.kills++; attacker.score += RULES.killScore; attacker.coins += RULES.killCoins;
       attacker.hp = Math.min(RULES.maxHp, attacker.hp + RULES.killHeal);
       attacker.streak++;
-      const aProf = board.getForPlayer(attacker); aProf.kills++;
-      if (attacker.streak > aProf.bestStreak) aProf.bestStreak = attacker.streak;
-      board.save();
+      if (!attacker.guest) {
+        const aProf = board.getForPlayer(attacker); aProf.kills++;
+        if (attacker.streak > aProf.bestStreak) aProf.bestStreak = attacker.streak;
+        board.save();
+      }
       kInfo = { id: attacker.id, n: attacker.name, c: attacker.color };
       const s = attacker.streak;
       const label = s === 3 ? '三连杀!' : s === 5 ? '五连杀!!' : s === 8 ? '八连杀，锐不可当!' : s === 12 ? '超神了!!!' : null;
@@ -1763,8 +1858,10 @@ class World {
       killer.buffs[bk] = now() + BUFFS[bk].dur * 1000;
       if (bk === 'shield') killer.shield = RULES.shieldHp;
       if (bk === 'zombie') killer.active = 'melee';
-      const prof = board.getForPlayer(killer); prof.bossKills++; board.save();
-      this.saveProfile(killer);
+      if (!killer.guest) {
+        const prof = board.getForPlayer(killer); prof.bossKills++; board.save();
+        this.saveProfile(killer);
+      }
       this.broadcast({ type: 'sys', style: 'boss', text: `🏆 ${killer.name} 击杀了 BOSS「${b.name}」！获得 ${b.cfg.killCoins} 金币 + 满血 + ${BUFFS[bk].name}增益` });
       this.sendYou(killer);
       if (b.type === 'amiya' && this.isAmiyaPlayer(killer)) {

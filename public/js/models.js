@@ -3,16 +3,8 @@ window.G = window.G || {};
 G.models = (function () {
   const T = THREE;
 
-  // ---------- 外部武器资源（Meshy GLB）----------
-  // Meshy 模型长轴多为 X：-X 枪口 / +X 握把侧；游戏约定枪口朝 -Z
-  const WEAPON_GLB = {
-    pistol: {
-      url: 'models/pistol.glb',
-      scale: 0.24,
-      offset: { x: 0, y: -0.02, z: -0.08 },
-      rotY: -Math.PI / 2,
-    },
-  };
+  // 外部 GLB 已移除，武器使用下方程序化模型
+  const WEAPON_GLB = {};
   const glbRoots = Object.create(null);
 
   function std(color, opt) {
