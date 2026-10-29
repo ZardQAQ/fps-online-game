@@ -115,13 +115,14 @@
       <img class="auth-logo linuxdo" src="icons/linuxdo.svg" alt="" width="22" height="22">
       <span class="auth-label">LinuxDo 登录</span>
     </button>
-    <button type="button" id="btnGuest" class="btn auth-choice" title="不保存数据，不能局内发言，不能修改昵称，不能开房">
+    <button type="button" id="btnGuest" class="btn auth-choice" title="后续会开放游客登录">
       <svg class="auth-logo guest" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
         <circle cx="12" cy="8" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8"/>
         <path d="M5.5 19.2c1.2-3.2 3.5-4.7 6.5-4.7s5.3 1.5 6.5 4.7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
       </svg>
       <span class="auth-label">游客登录</span>
     </button>
+    <p id="authPickMsg" class="login-hint auth-pick-msg hidden"></p>
   </div>
 </div>
 
@@ -203,6 +204,7 @@
   <button id="tInspect" class="tbtn tInspect" aria-label="检视">T</button>
   <button id="tJump" class="tbtn tJump" aria-label="跳跃">⤒</button>
   <button id="tFire" class="tbtn tFire" aria-label="开火">◎</button>
+  <button id="tFireLeft" class="tbtn tFire tFireLeft hidden" aria-label="左手开火">◎</button>
   <!-- 观战自由视角升降（仅观战自由飞行时显示） -->
   <button id="tUp" class="tbtn tUp hidden" aria-label="上升">⤒</button>
   <button id="tDown" class="tbtn tDown hidden" aria-label="下降">⤓</button>
@@ -210,7 +212,7 @@
 
 <!-- 触屏按键布局调整 -->
 <div id="touchEditBar" class="hidden">
-  <div class="touch-edit-tip">拖动按键到合适位置 · 可调整开火/跳跃/换弹/检视/开镜/菜单/摇杆区等</div>
+  <div class="touch-edit-tip">拖动按键到合适位置 · 可调整开火/左手开火/跳跃/换弹/检视/开镜/菜单/摇杆区等</div>
   <div class="touch-edit-actions">
     <button id="btnTouchReset" type="button" class="btn small ghost">恢复默认</button>
     <button id="btnTouchCancel" type="button" class="btn small">取消</button>

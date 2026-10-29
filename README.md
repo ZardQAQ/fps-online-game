@@ -2,6 +2,8 @@
 
 3D 第一人称多人在线混战射击游戏。一个 URL，多个客户端直接进入同一房间开打 —— 无需注册、无需下载。
 
+> **二次开发说明**：本项目基于 [kejilion/game-collection](https://github.com/kejilion/game-collection) 中的 [Neon Arena FPS](https://github.com/kejilion/game-collection/tree/main/games/neon-arena-fps) 进行二次开发与扩展，原项目采用 MIT 协议。感谢原作者 [kejilion](https://github.com/kejilion) 开源。
+
 - **服务端**：Node.js（express + ws），单房间权威服务器，所有伤害/拾取/购买均在服务端判定
 - **客户端**：Three.js 第一人称，全部模型/贴图/音效程序化生成，零外部资源
 - **持久化**：排行榜与玩家档案（金币/外观）按 **IP** 索引保存在 `data/profiles.json`；昵称全局唯一，改名只更新该 IP 账号，不会新建账号

@@ -520,13 +520,8 @@ wss.on('connection', (ws, req) => {
 
     switch (m.type) {
       case 'guest_login': {
-        if (p) return;
-        if (ws.oauth) {
-          rawSend(ws, JSON.stringify({ type: 'guest', ok: false, text: '已登录，请直接进入战斗' }));
-          return;
-        }
-        const name = allocGuestName(ws);
-        rawSend(ws, JSON.stringify({ type: 'guest', ok: true, name }));
+        // 游客登录暂时关闭，恢复时删掉下面这行并还原原分配逻辑
+        rawSend(ws, JSON.stringify({ type: 'guest', ok: false, text: '后续会开放游客登录' }));
         break;
       }
       case 'guest_logout': {
@@ -554,6 +549,10 @@ wss.on('connection', (ws, req) => {
         if (p) return;
         const isNpcJoin = m.npc === NPC_TOKEN;
         const guestJoin = !isNpcJoin && !ws.oauth && !!m.guest;
+        if (guestJoin) {
+          rawSend(ws, JSON.stringify({ type: 'err', text: '后续会开放游客登录' }));
+          return;
+        }
         const target = isNpcJoin ? officialRoom : roomById(m.roomId);
         if (!target) {
           rawSend(ws, JSON.stringify({ type: 'err', text: '房间不存在或已关闭' }));

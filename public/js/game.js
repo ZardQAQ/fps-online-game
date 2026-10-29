@@ -747,6 +747,8 @@
       const label = ld.querySelector('.auth-label');
       if (label) label.textContent = linuxdoEnabled ? 'LinuxDo 登录' : 'LinuxDo 未配置';
     }
+    const guestMsg = $('authPickMsg');
+    if (guestMsg) { guestMsg.textContent = ''; guestMsg.classList.add('hidden'); }
     $('authPick').classList.remove('hidden');
   }
   function closeAuthPick() {
@@ -1755,6 +1757,7 @@
     const show = (id, on) => $(id).classList.toggle('hidden', !on);
     $('touchLayer').classList.toggle('hidden', !(play || spec));   // 菜单态整体收起
     show('tFire', play);
+    show('tFireLeft', false);
     show('tJump', play);
     show('tReload', play);
     show('tInspect', play);
@@ -1774,6 +1777,7 @@
   // ---------- 触屏按键布局（可自定义，localStorage 持久化） ----------
   const TOUCH_LAYOUT_DEFAULT = {
     tFire:   { x: 0.905, y: 0.82 },
+    tFireLeft: { x: 0.22, y: 0.58 },
     tJump:   { x: 0.785, y: 0.80 },
     tReload: { x: 0.685, y: 0.78 },
     tInspect:{ x: 0.585, y: 0.78 },
@@ -1785,9 +1789,13 @@
     tDown:   { x: 0.965, y: 0.88 },
     joy:     { x: 0.13, y: 0.82, r: 0.09 },
   };
-  const TOUCH_EDIT_BTNS = ['tFire', 'tJump', 'tReload', 'tInspect', 'tScope', 'tMenu', 'tBoard', 'tChat', 'tUp', 'tDown'];
+  const TOUCH_EDIT_BTNS = ['tFire', 'tFireLeft', 'tJump', 'tReload', 'tInspect', 'tScope', 'tMenu', 'tBoard', 'tChat', 'tUp', 'tDown'];
+  const TOUCH_BTN_SIZE = {
+    tFire: 82, tFireLeft: 96, tJump: 60, tReload: 56, tInspect: 52, tScope: 56,
+    tMenu: 42, tBoard: 42, tChat: 42, tUp: 44, tDown: 44,
+  };
   const TOUCH_LABELS = {
-    tFire: '开火', tJump: '跳跃', tReload: '换弹', tInspect: '检视', tScope: '开镜', tMenu: '设置', tBoard: '榜单', tChat: '聊天',
+    tFire: '开火', tFireLeft: '左手开火', tJump: '跳跃', tReload: '换弹', tInspect: '检视', tScope: '开镜', tMenu: '设置', tBoard: '榜单', tChat: '聊天',
     tUp: '上升', tDown: '下降', joy: '摇杆区',
   };
   function cloneTouchLayout(src) {
@@ -1795,6 +1803,8 @@
     for (const k of Object.keys(TOUCH_LAYOUT_DEFAULT)) {
       o[k] = { ...TOUCH_LAYOUT_DEFAULT[k], ...(src && src[k] ? src[k] : {}) };
     }
+    // 摇杆外观半径固定为默认小圆；可触摸范围是屏幕左三分之一，不跟这个圆走
+    if (o.joy) o.joy.r = TOUCH_LAYOUT_DEFAULT.joy.r;
     return o;
   }
   function loadTouchLayout() {
@@ -1831,14 +1841,14 @@
     TOUCH_EDIT_BTNS.forEach(id => {
       const el = $(id);
       if (!el) return;
-      placeTouchEl(el, touchLayout[id]);
+      placeTouchEl(el, touchLayout[id], TOUCH_BTN_SIZE[id]);
       el.dataset.touchLabel = TOUCH_LABELS[id] || id;
     });
     const hint = $('joyHint');
     const joy = touchLayout.joy;
     if (hint && joy) {
-      const r = joy.r * Math.min(innerWidth, innerHeight);
-      const d = r * 2;
+      const visR = joy.r * Math.min(innerWidth, innerHeight);
+      const d = visR * 2;
       hint.style.width = d + 'px';
       hint.style.height = d + 'px';
       placeTouchEl(hint, joy, d);
@@ -2602,6 +2612,7 @@
     if (me.nadeHolding || me.nadePrimeSent) tryNadeThrow();
     for (const k in keys) keys[k] = false; mouseDown = rmbDown = false;
     touch.joyId = touch.lookId = null; activeTouches.clear();
+    fireTouch.right = fireTouch.left = false;
   });
 
   // ---------- 触屏：虚拟摇杆 + 视角拖拽（document 级监听，避免触控层挡住 canvas 收不到触摸） ----------
@@ -2612,13 +2623,15 @@
   }
   function touchHitsUi(x, y) {
     const el = document.elementFromPoint(x, y);
-    return !!(el && el.closest('#weaponPanel, .wslot, .tbtn, #interactHint, #chatBox, #chatInputRow, .overlay:not(.hidden), button, input, .panel-close, .spec-btn'));
+    if (!el) return false;
+    // 血条、聊天记录、击杀播报等只是信息，不挡左手移动；按钮和输入框仍独占触摸
+    if (el.closest('#chatMsgs, #vitals, #topLeft, #killfeed, #notice, #bigNotice, #bossBar, #bossTimer, #protectHint, #statLine, #hud')) {
+      if (!el.closest('#weaponPanel, .wslot, .tbtn, #interactHint, #chatInputRow, button, input')) return false;
+    }
+    return !!el.closest('#weaponPanel, .wslot, .tbtn, #interactHint, #chatInputRow, .overlay:not(.hidden), button, input, .panel-close, .spec-btn');
   }
-  function joyZoneHit(x, y) {
-    const joy = touchLayout.joy || TOUCH_LAYOUT_DEFAULT.joy;
-    const r = joy.r * Math.min(innerWidth, innerHeight) * 1.35;
-    const cx = joy.x * innerWidth, cy = joy.y * innerHeight;
-    return Math.hypot(x - cx, y - cy) <= r;
+  function joyZoneHit(x) {
+    return x < innerWidth / 3;
   }
   function showJoyAt(x, y) {
     const base = $('joyBase');
@@ -2696,22 +2709,35 @@
       el.onclick = handler;
     }
   }
-  $('tFire').addEventListener('touchstart', e => {
-    e.preventDefault();
-    if (touchActionAllowed()) {
-      mouseDown = true;
-      if (me.active === 'nade') tryNadePrime();
-    }
-  }, { passive: false });
-  $('tFire').addEventListener('touchend', e => {
-    e.preventDefault();
+  // 左右开火键各自按住；松掉其中一个时，另一个还按着就继续开火
+  const fireTouch = { right: false, left: false };
+  function releaseFireTouch(which) {
+    if (!fireTouch[which]) return;
+    fireTouch[which] = false;
+    if (fireTouch.right || fireTouch.left) return;
     if (me.nadeHolding || me.nadePrimeSent) tryNadeThrow();
     mouseDown = false;
-  }, { passive: false });
-  $('tFire').addEventListener('touchcancel', () => {
-    if (me.nadeHolding || me.nadePrimeSent) tryNadeThrow();
-    mouseDown = false;
-  });
+  }
+  function bindFireTouch(el, which) {
+    if (!el) return;
+    el.addEventListener('touchstart', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!touchActionAllowed()) return;
+      fireTouch[which] = true;
+      if (!mouseDown) {
+        mouseDown = true;
+        if (me.active === 'nade') tryNadePrime();
+      }
+    }, { passive: false });
+    el.addEventListener('touchend', e => {
+      e.preventDefault();
+      releaseFireTouch(which);
+    }, { passive: false });
+    el.addEventListener('touchcancel', () => releaseFireTouch(which));
+  }
+  bindFireTouch($('tFire'), 'right');
+  bindFireTouch($('tFireLeft'), 'left');
   $('tJump').addEventListener('touchstart', e => { e.preventDefault(); if (touchActionAllowed()) keys.Space = true; }, { passive: false });
   $('tJump').addEventListener('touchend', e => { e.preventDefault(); keys.Space = false; }, { passive: false });
   $('tJump').addEventListener('touchcancel', () => { keys.Space = false; });
@@ -3308,7 +3334,14 @@
   if ($('btnPickNodeLoc')) $('btnPickNodeLoc').onclick = () => { G.audio.init(); closeAuthPick(); goNodeLocLogin(); };
   if ($('btnPickLinuxDo')) $('btnPickLinuxDo').onclick = () => { G.audio.init(); closeAuthPick(); goLinuxDoLogin(); };
   if ($('authPickClose')) $('authPickClose').onclick = () => closeAuthPick();
-  if ($('btnGuest')) $('btnGuest').onclick = () => { G.audio.init(); closeAuthPick(); enterGuestMode(); };
+  if ($('btnGuest')) $('btnGuest').onclick = () => {
+    G.audio.init();
+    const msg = $('authPickMsg');
+    if (msg) {
+      msg.textContent = '后续会开放游客登录';
+      msg.classList.remove('hidden');
+    }
+  };
   if ($('btnCreateRoom')) $('btnCreateRoom').onclick = () => {
     G.audio.init();
     const hint = $('roomCreateHint');
@@ -4117,9 +4150,17 @@
   function hudFrame() {
     if (TOUCH) {
       const showScope = mode === 'play' && mySnap && mySnap.al && gunHasZoom(mySnap.gw) && me.active === 'gun';
-      $('tScope').classList.toggle('hidden', !showScope);
+      $('tScope').classList.toggle('hidden', !showScope && !touchEditMode);
       if (!showScope && rmbDown) rmbDown = false;          // 切走狙击枪自动收镜
       $('tScope').classList.toggle('on', showScope && rmbDown);
+      const leftFire = $('tFireLeft');
+      if (leftFire) {
+        const ads = showScope && rmbDown;
+        const showLeft = touchEditMode || ads;
+        if (!showLeft && fireTouch.left) releaseFireTouch('left');
+        leftFire.classList.toggle('hidden', !showLeft);
+        leftFire.classList.toggle('on', !!(ads && fireTouch.left));
+      }
       const canReload = mode === 'play' && mySnap && mySnap.al && me.active === 'gun' && mySnap.gw
         && defs && defs.weapons[mySnap.gw] && !defs.weapons[mySnap.gw].noReload;
       $('tReload').classList.toggle('hidden', !canReload);

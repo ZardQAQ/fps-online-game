@@ -100,6 +100,7 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #05070d;
 .auth-pick { width: 360px; }
 .auth-pick .panel-title { justify-content: center; text-align: center; }
 .auth-pick .login-hint { margin-bottom: 14px; text-align: center; }
+.auth-pick-msg { color: #f0b86c; margin: 2px 0 0; min-height: 18px; }
 .auth-pick .btn { margin-bottom: 8px; }
 .auth-pick button.auth-choice {
   display: flex;
@@ -275,8 +276,8 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #05070d;
 #statLine { position: fixed; right: 8px; bottom: 4px; z-index: 10; font-size: 10px; color: rgba(160,200,220,.55); }
 
 /* ---------- 聊天 ---------- */
-#chatBox { position: fixed; left: calc(20px + env(safe-area-inset-left, 0px)); bottom: 110px; z-index: 11; width: 340px; max-width: 45vw; transition: bottom .15s; }
-#chatMsgs { display: flex; flex-direction: column; gap: 3px; max-height: 200px; overflow: hidden; justify-content: flex-end; }
+#chatBox { position: fixed; left: calc(20px + env(safe-area-inset-left, 0px)); bottom: 110px; z-index: 11; width: 340px; max-width: 45vw; transition: bottom .15s; pointer-events: none; }
+#chatMsgs { display: flex; flex-direction: column; gap: 3px; max-height: 200px; overflow: hidden; justify-content: flex-end; pointer-events: none; }
 .cmsg { font-size: 13px; padding: 3px 9px; background: rgba(6,10,18,.62); border-radius: 5px; line-height: 1.45;
   word-break: break-all; animation: kfIn .15s ease-out; }
 .cmsg .cname { font-weight: 700; }
@@ -286,7 +287,7 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #05070d;
 .cmsg.sys.kill { color: #ffc9a8; font-weight: 700; font-style: normal; }
 .cmsg.sys.shop { color: #d0a9ff; }
 .cmsg.sys.priv { color: #7ec8a0; font-style: italic; opacity: 0.92; }
-#chatInputRow { margin-top: 6px; display: flex; gap: 6px; }
+#chatInputRow { margin-top: 6px; display: flex; gap: 6px; pointer-events: auto; }
 #chatInput { flex: 1; min-width: 0; padding: 8px 12px; font-size: 14px; color: #fff; background: rgba(8,14,26,.85);
   border: 1px solid var(--neon); border-radius: 6px; outline: none; font-family: inherit; }
 #chatSendBtn { flex: 0 0 auto; padding: 8px 16px; font-size: 13px; font-weight: 700; color: #05202c;
@@ -469,6 +470,10 @@ body.mobile #specTarget { font-size: 11.5px; font-weight: 700; margin: 0; min-he
 .tFire { width: 82px; height: 82px; right: calc(24px + env(safe-area-inset-right, 0px)); bottom: calc(30px + env(safe-area-inset-bottom, 0px));
   font-size: 34px; border-color: rgba(255,90,90,.55); }
 .tFire:active { background: rgba(255,60,60,.32); }
+/* 开镜后出现在左侧：右手滑屏瞄准，左手点这里开枪 */
+.tFireLeft { width: 96px; height: 96px; left: calc(36px + env(safe-area-inset-left, 0px));
+  top: 52%; right: auto; bottom: auto; font-size: 38px; z-index: 22;
+  box-shadow: 0 0 18px rgba(255, 70, 70, .28); }
 .tJump { width: 60px; height: 60px; right: calc(118px + env(safe-area-inset-right, 0px)); bottom: calc(44px + env(safe-area-inset-bottom, 0px)); }
 .tScope { width: 56px; height: 56px; right: calc(34px + env(safe-area-inset-right, 0px)); bottom: calc(122px + env(safe-area-inset-bottom, 0px));
   border-color: rgba(255,210,60,.5); font-size: 24px; }
