@@ -738,9 +738,11 @@
     const nl = $('btnPickNodeLoc');
     const ld = $('btnPickLinuxDo');
     if (nl) {
-      nl.disabled = !nodelocEnabled;
-      const label = nl.querySelector('.auth-label');
-      if (label) label.textContent = nodelocEnabled ? 'NodeLoc 登录' : 'NodeLoc 未配置';
+      // 暂时隐藏 NodeLoc 登录入口，保留 DOM 便于日后恢复
+      nl.classList.add('hidden');
+      nl.hidden = true;
+      nl.setAttribute('aria-hidden', 'true');
+      nl.disabled = true;
     }
     if (ld) {
       ld.disabled = !linuxdoEnabled;
@@ -785,7 +787,7 @@
         : '正在分配游客昵称…不保存数据，不能发言，不能改名';
       hint.className = 'pass-hint warn';
     } else {
-      hint.textContent = 'NodeLoc 或 LinuxDo 登录可保存数据；游客登录不保存、不能发言、不能改名';
+      hint.textContent = 'LinuxDo 登录可保存数据；游客登录不保存、不能发言、不能改名';
       hint.className = 'pass-hint';
     }
   }
@@ -3272,7 +3274,7 @@
       tip.innerHTML =
         '<div class="ret-ico" aria-hidden="true">🛰️</div>' +
         '<div class="ret-title">暂无玩家自建房间</div>' +
-        '<div class="ret-sub">登录 NodeLoc / LinuxDo 账号后可在上方创建专属房间，与好友同场竞技</div>' +
+        '<div class="ret-sub">登录 LinuxDo 账号后可在上方创建专属房间，与好友同场竞技</div>' +
         '<div class="ret-tags"><span>👥 10人上限</span><span>⚡ 即开即战</span><span>🔄 空房自动回收</span></div>';
       box.appendChild(tip);
     }
